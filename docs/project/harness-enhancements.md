@@ -45,9 +45,11 @@ Project C
 
 Ownership model:
 
-- Workspace owns task-level lifecycle state: branch, worktree path, `.context`, task list, setup scripts, checks, review state, and PR state.
+- Workspace owns task-level lifecycle state: branch, worktree path, `.context`, task list,
+  terminal sessions, right-panel surfaces, setup scripts, checks, review state, and PR state.
 - Chat/thread owns conversation-level state: messages, provider session, turns, turn diffs, and approvals.
-- Existing one-thread work should migrate into a default workspace with one chat.
+- Existing work should migrate into generated default workspaces grouped by stable execution
+  identity: worktree path when present, otherwise branch-only or the local checkout.
 
 Expected behavior:
 
@@ -59,6 +61,8 @@ Expected behavior:
 - Collapsed workspaces show only workspace-level status such as name, branch/status, and changed-file count.
 - Expanded workspaces show their chats, with the active chat highlighted.
 - The center layout does not change in the first implementation; no Conductor-style center chat tabs.
+- Terminal drawer state and right-panel surfaces should follow the active workspace rather than
+  resetting per chat, while chat-specific plan/diff content can still render the selected chat's data.
 
 Initial implementation notes:
 
@@ -91,16 +95,18 @@ Project A
 
 After migration:
 Project A
-  Workspace generated from Thread 1
+  Workspace generated from shared branch/worktree context
     Chat/Thread 1
-  Workspace generated from Thread 2
     Chat/Thread 2
 ```
 
 Compatibility rules:
 
 - Add workspace tables/fields before removing or repurposing thread fields.
-- Backfill one workspace per existing thread for the first migration.
+- Backfill one workspace per stable execution identity for the first migration, so multiple
+  legacy threads on the same worktree or local branch appear as sibling chats.
+- Treat branch name as mutable workspace metadata, not workspace identity, so branch renames
+  update the label without creating a new sidebar workspace.
 - Keep `thread.branch` and `thread.worktreePath` readable during the transition.
 - Add `workspace.branch` and `workspace.worktreePath`, initially copied or derived from the thread.
 - If a thread is missing workspace linkage, synthesize a default workspace in the projection rather than failing the UI.
@@ -416,7 +422,7 @@ Show per workspace:
 
 Initial implementation notes:
 
-- Reuse existing thread shell projections, VCS status, source-control state, terminal sessions, and preview sessions.
+- Reuse existing thread shell projections, VCS status, source-control state, terminal sessions, and preview sessions while migrating terminal/right-panel ownership from thread keys to workspace keys.
 - Start read-only before adding lifecycle actions.
 - This should become the user's home base for parallel agent work.
 

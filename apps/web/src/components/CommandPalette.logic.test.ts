@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
+  buildRootGroups,
   buildThreadActionItems,
   filterCommandPaletteGroups,
+  getCommandPaletteInputPlaceholder,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -112,7 +114,7 @@ describe("buildThreadActionItems", () => {
   it("preserves thread project-name matches when there is no stronger title match", () => {
     const group: CommandPaletteGroup = {
       value: "threads-search",
-      label: "Threads",
+      label: "Chats",
       items: [
         {
           kind: "action",
@@ -161,5 +163,92 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+
+  it("describes branch-backed threads as chats in their workspace", () => {
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-active"),
+          title: "Find Next Tracker Task",
+          branch: "ios-app-stripe-plan",
+        }),
+      ],
+      activeThreadId: ThreadId.make("thread-active"),
+      projectTitleById: new Map([[PROJECT_ID, "capsi-ios-app"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => undefined,
+    });
+
+    expect(items[0]?.description).toBe("capsi-ios-app · ios-app-stripe-plan · Current chat");
+  });
+
+  it("falls back to the worktree folder for the workspace subtitle", () => {
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-worktree"),
+          title: "Run App Command",
+          worktreePath: "/repo/.t3/worktrees/ios-app-stripe-plan",
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "capsi-ios-app"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => undefined,
+    });
+
+    expect(items[0]?.description).toBe("capsi-ios-app · ios-app-stripe-plan");
+  });
+});
+
+describe("buildRootGroups", () => {
+  it("labels recent threads as recent chats", () => {
+    const groups = buildRootGroups({
+      actionItems: [],
+      recentThreadItems: [
+        {
+          kind: "action",
+          value: "thread:thread-1",
+          searchTerms: ["Thread"],
+          title: "Thread",
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+    });
+
+    expect(groups[0]?.label).toBe("Recent Chats");
+  });
+});
+
+describe("filterCommandPaletteGroups", () => {
+  it("labels thread search results as chats", () => {
+    const threadItems = buildThreadActionItems({
+      threads: [makeThread({ title: "Find Next Tracker Task" })],
+      projectTitleById: new Map([[PROJECT_ID, "capsi-ios-app"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => undefined,
+    });
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "tracker",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: threadItems,
+    });
+
+    expect(groups[0]?.label).toBe("Chats");
+  });
+});
+
+describe("getCommandPaletteInputPlaceholder", () => {
+  it("uses chat terminology in the root placeholder", () => {
+    expect(getCommandPaletteInputPlaceholder("root")).toBe(
+      "Search commands, projects, and chats...",
+    );
   });
 });

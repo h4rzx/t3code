@@ -12,6 +12,7 @@ import {
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
+  resolveWorkspaceScopedThreadRef,
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
@@ -299,6 +300,64 @@ describe("reconcileRetainedMountedThreadIds", () => {
         maxHiddenThreadCount: MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
       }),
     ).toEqual(currentThreadIds.slice(-MAX_HIDDEN_MOUNTED_PREVIEW_THREADS));
+  });
+});
+
+describe("resolveWorkspaceScopedThreadRef", () => {
+  it("uses the oldest thread in the same worktree as the workspace owner", () => {
+    const activeThread = makeThread({
+      id: ThreadId.make("thread-active"),
+      branch: "feature/current-name",
+      worktreePath: "/repo/.t3/worktrees/workspace-a",
+      createdAt: "2026-03-29T00:10:00.000Z",
+    });
+    const owner = makeThread({
+      id: ThreadId.make("thread-owner"),
+      branch: "feature/old-name",
+      worktreePath: "/repo/.t3/worktrees/workspace-a",
+      createdAt: "2026-03-29T00:00:00.000Z",
+    });
+    const other = makeThread({
+      id: ThreadId.make("thread-other"),
+      branch: "feature/current-name",
+      worktreePath: "/repo/.t3/worktrees/workspace-b",
+      createdAt: "2026-03-29T00:00:00.000Z",
+    });
+
+    expect(
+      resolveWorkspaceScopedThreadRef({
+        activeThread,
+        threads: [activeThread, other, owner],
+      }),
+    ).toEqual({ environmentId, threadId: ThreadId.make("thread-owner") });
+  });
+
+  it("uses branch as the workspace owner key only when no worktree exists", () => {
+    const activeThread = makeThread({
+      id: ThreadId.make("thread-active"),
+      branch: "feature/local",
+      worktreePath: null,
+      createdAt: "2026-03-29T00:10:00.000Z",
+    });
+    const owner = makeThread({
+      id: ThreadId.make("thread-owner"),
+      branch: "feature/local",
+      worktreePath: null,
+      createdAt: "2026-03-29T00:00:00.000Z",
+    });
+    const other = makeThread({
+      id: ThreadId.make("thread-other"),
+      branch: "feature/other",
+      worktreePath: null,
+      createdAt: "2026-03-29T00:00:00.000Z",
+    });
+
+    expect(
+      resolveWorkspaceScopedThreadRef({
+        activeThread,
+        threads: [activeThread, other, owner],
+      }),
+    ).toEqual({ environmentId, threadId: ThreadId.make("thread-owner") });
   });
 });
 

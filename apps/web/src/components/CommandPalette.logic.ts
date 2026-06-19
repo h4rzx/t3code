@@ -6,6 +6,7 @@ import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
+import { resolveDefaultWorkspaceTitle } from "./WorkspacePresentation.logic";
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground/80";
@@ -113,7 +114,14 @@ export function buildProjectActionItems(input: {
 
 export type BuildThreadActionItemsThread = Pick<
   SidebarThreadSummary,
-  "archivedAt" | "branch" | "createdAt" | "environmentId" | "id" | "projectId" | "title"
+  | "archivedAt"
+  | "branch"
+  | "createdAt"
+  | "environmentId"
+  | "id"
+  | "projectId"
+  | "title"
+  | "worktreePath"
 > & {
   updatedAt: string;
   latestUserMessageAt?: string | null;
@@ -146,11 +154,15 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
     if (projectTitle) {
       descriptionParts.push(projectTitle);
     }
-    if (thread.branch) {
-      descriptionParts.push(`#${thread.branch}`);
+    const workspaceTitle = resolveDefaultWorkspaceTitle({
+      branch: thread.branch,
+      worktreePath: thread.worktreePath,
+    });
+    if (workspaceTitle !== "Local workspace") {
+      descriptionParts.push(workspaceTitle);
     }
     if (thread.id === input.activeThreadId) {
-      descriptionParts.push("Current thread");
+      descriptionParts.push("Current chat");
     }
 
     const leadingContent = input.renderLeadingContent?.(thread);
@@ -249,7 +261,7 @@ export function filterCommandPaletteGroups(input: {
     if (input.threadSearchItems.length > 0) {
       searchableGroups.push({
         value: "threads-search",
-        label: "Threads",
+        label: "Chats",
         items: input.threadSearchItems,
       });
     }
@@ -342,7 +354,7 @@ export function buildRootGroups(input: {
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent Threads",
+      label: "Recent Chats",
       items: input.recentThreadItems,
     });
   }
@@ -352,7 +364,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search commands, projects, and chats...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":
