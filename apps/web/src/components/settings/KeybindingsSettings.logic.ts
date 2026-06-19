@@ -275,6 +275,17 @@ export function commandLabel(command: KeybindingCommand): string {
   return raw.split(".").map(titleCaseCommandSegment).join(": ");
 }
 
+export function commandDescription(command: KeybindingCommand): string | null {
+  switch (command) {
+    case "chat.new":
+      return "Create a chat in the active context, preserving branch/worktree for the current project.";
+    case "chat.newLocal":
+      return "Create a chat for the active project with branch/worktree cleared.";
+    default:
+      return null;
+  }
+}
+
 function titleCaseCommandSegment(segment: string): string {
   const words: Array<string> = [];
   for (const part of segment.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[-_\s]+/)) {
