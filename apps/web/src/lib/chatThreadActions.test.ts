@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
   startNewLocalThreadFromContext,
+  startNewThreadInProjectFromContext,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
@@ -74,6 +75,33 @@ describe("chatThreadActions", () => {
     });
   });
 
+  it("does not copy active thread branch context when starting in another project", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+
+    await startNewThreadInProjectFromContext(
+      createContext({
+        activeThread: {
+          environmentId: ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          branch: "ios-app-stripe-plan",
+          worktreePath: "/tmp/ios-app-stripe-plan",
+        },
+        defaultThreadEnvMode: "worktree",
+        handleNewThread,
+      }),
+      scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID),
+    );
+
+    expect(handleNewThread).toHaveBeenCalledWith(
+      scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID),
+      {
+        branch: null,
+        worktreePath: null,
+        envMode: "worktree",
+      },
+    );
+  });
+
   it("starts a local thread with the configured default env mode", async () => {
     const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
 
@@ -87,6 +115,8 @@ describe("chatThreadActions", () => {
 
     expect(didStart).toBe(true);
     expect(handleNewThread).toHaveBeenCalledWith(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), {
+      branch: null,
+      worktreePath: null,
       envMode: "worktree",
     });
   });

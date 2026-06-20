@@ -27,6 +27,7 @@ import {
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
+import { resolveThreadWorkspaceIdentityPatch } from "./threadWorkspaceIdentity.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
@@ -341,14 +342,19 @@ export function projectEvent(
       return decodeForEvent(ThreadMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            ...(payload.title !== undefined ? { title: payload.title } : {}),
-            ...(payload.modelSelection !== undefined
-              ? { modelSelection: payload.modelSelection }
-              : {}),
-            ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
-            ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
-            updatedAt: payload.updatedAt,
+          threads: nextBase.threads.map((thread) => {
+            if (thread.id !== payload.threadId) {
+              return thread;
+            }
+            return {
+              ...thread,
+              ...(payload.title !== undefined ? { title: payload.title } : {}),
+              ...(payload.modelSelection !== undefined
+                ? { modelSelection: payload.modelSelection }
+                : {}),
+              ...resolveThreadWorkspaceIdentityPatch(thread, payload),
+              updatedAt: payload.updatedAt,
+            };
           }),
         })),
       );

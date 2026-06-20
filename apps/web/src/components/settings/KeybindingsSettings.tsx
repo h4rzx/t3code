@@ -57,6 +57,7 @@ import {
   buildKeybindingRows,
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
+  commandDescription,
   commandLabel,
   DEFAULT_WHEN_VARIABLE,
   isKnownWhenVariable,
@@ -781,6 +782,7 @@ function KeybindingTableRow({
   const whenDraftExpression = whenAstToExpression(whenDraft);
   const isDirty = keyDraft !== row.key || whenDraftExpression !== row.when;
   const displayShortcut = formatShortcutLabel(row.binding.shortcut);
+  const description = commandDescription(row.command);
   const canReset = row.source === "Custom" && row.defaultKey !== null;
   const canRemove = row.source !== "Default";
   const hasRowActions = canReset || canRemove;
@@ -830,6 +832,11 @@ function KeybindingTableRow({
             <TooltipPopup side="top">{row.command}</TooltipPopup>
           </Tooltip>
         </div>
+        {description ? (
+          <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+            {description}
+          </div>
+        ) : null}
       </div>
       <div className="flex min-w-0 items-center gap-2 pr-4">
         {showPill ? (

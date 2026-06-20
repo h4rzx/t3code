@@ -3,8 +3,11 @@ import {
   createThreadJumpHintVisibilityController,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
+  getVisibleWorkspaceThreads,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
+  buildDefaultWorkspacesForThreads,
+  getVisibleWorkspaceSidebarThreadKeys,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
@@ -747,6 +750,218 @@ describe("getVisibleThreadsForProject", () => {
       threads.map((thread) => thread.id),
     );
     expect(result.hiddenThreads).toEqual([]);
+  });
+});
+
+describe("buildDefaultWorkspacesForThreads", () => {
+  it("groups legacy threads that share the same execution context into one default workspace", () => {
+    const workspaces = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-1"),
+          title: "Add settings",
+          branch: "feature/settings",
+          worktreePath: "/repo/.t3/worktrees/settings",
+          createdAt: "2026-03-09T10:00:00.000Z",
+          updatedAt: "2026-03-09T10:05:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("thread-2"),
+          title: "Review settings",
+          branch: "feature/settings",
+          worktreePath: "/repo/.t3/worktrees/settings",
+          createdAt: "2026-03-09T10:10:00.000Z",
+          updatedAt: "2026-03-09T10:20:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("thread-3"),
+          title: "Fix auth",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-03-09T10:30:00.000Z",
+          updatedAt: "2026-03-09T10:40:00.000Z",
+        }),
+      ],
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+
+    expect(workspaces).toEqual([
+      {
+        id: "project:local:project-1:workspace:worktree:/repo/.t3/worktrees/settings",
+        projectKey: "project:local:project-1",
+        title: "feature/settings",
+        branch: "feature/settings",
+        worktreePath: "/repo/.t3/worktrees/settings",
+        lastActiveThreadKey: "thread:thread-1",
+        threads: [
+          expect.objectContaining({
+            id: ThreadId.make("thread-1"),
+            title: "Add settings",
+          }),
+          expect.objectContaining({
+            id: ThreadId.make("thread-2"),
+            title: "Review settings",
+          }),
+        ],
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:20:00.000Z",
+      },
+      {
+        id: "project:local:project-1:workspace:local",
+        projectKey: "project:local:project-1",
+        title: "Local workspace",
+        branch: null,
+        worktreePath: null,
+        lastActiveThreadKey: "thread:thread-3",
+        threads: [
+          expect.objectContaining({
+            id: ThreadId.make("thread-3"),
+            title: "Fix auth",
+          }),
+        ],
+        createdAt: "2026-03-09T10:30:00.000Z",
+        updatedAt: "2026-03-09T10:40:00.000Z",
+      },
+    ]);
+  });
+
+  it("falls back to the worktree folder when a legacy thread has no branch", () => {
+    const workspaces = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-worktree"),
+          title: "Fix checkout",
+          branch: null,
+          worktreePath: "/repo/.t3/worktrees/checkout-fix",
+        }),
+      ],
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+
+    expect(workspaces[0]?.title).toBe("checkout-fix");
+  });
+
+  it("keeps the generated workspace id stable when a worktree branch is renamed", () => {
+    const beforeRename = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-worktree"),
+          title: "Run checks",
+          branch: "feature/old-name",
+          worktreePath: "/repo/.t3/worktrees/checks",
+        }),
+      ],
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+    const afterRename = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-worktree"),
+          title: "Run checks",
+          branch: "feature/new-name",
+          worktreePath: "/repo/.t3/worktrees/checks",
+        }),
+      ],
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+
+    expect(afterRename[0]?.id).toBe(beforeRename[0]?.id);
+    expect(afterRename[0]?.title).toBe("feature/new-name");
+  });
+
+  it("uses a stable local workspace label for legacy threads without branch or worktree context", () => {
+    const workspaces = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-untitled"),
+          title: "   ",
+        }),
+      ],
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+
+    expect(workspaces[0]?.title).toBe("Local workspace");
+  });
+});
+
+describe("getVisibleWorkspaceThreads", () => {
+  it("shows all workspace chats while expanded", () => {
+    const threads = [
+      makeThread({ id: ThreadId.make("thread-1") }),
+      makeThread({ id: ThreadId.make("thread-2") }),
+    ];
+
+    expect(getVisibleWorkspaceThreads({ threads, workspaceExpanded: true })).toEqual(threads);
+  });
+
+  it("hides all workspace chats while collapsed, including the active chat", () => {
+    const threads = [
+      makeThread({ id: ThreadId.make("thread-1") }),
+      makeThread({ id: ThreadId.make("thread-2") }),
+    ];
+
+    expect(getVisibleWorkspaceThreads({ threads, workspaceExpanded: false })).toEqual([]);
+  });
+});
+
+describe("getVisibleWorkspaceSidebarThreadKeys", () => {
+  it("returns visible chat keys for expanded workspaces", () => {
+    const threads = [
+      makeThread({ id: ThreadId.make("thread-1") }),
+      makeThread({ id: ThreadId.make("thread-2") }),
+    ];
+    const workspaces = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads,
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+
+    expect(
+      getVisibleWorkspaceSidebarThreadKeys({
+        workspaces,
+        projectExpanded: true,
+        activeThreadKey: null,
+        workspaceExpandedById: {},
+        getThreadKey: (thread) => `thread:${thread.id}`,
+      }),
+    ).toEqual(["thread:thread-1", "thread:thread-2"]);
+  });
+
+  it("does not expose active chat shortcuts when its workspace is collapsed", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.make("thread-1"),
+        branch: "feature/settings",
+        worktreePath: "/repo/.t3/worktrees/settings",
+      }),
+      makeThread({
+        id: ThreadId.make("thread-2"),
+        branch: "feature/settings",
+        worktreePath: "/repo/.t3/worktrees/settings",
+      }),
+    ];
+    const workspaces = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads,
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+
+    expect(
+      getVisibleWorkspaceSidebarThreadKeys({
+        workspaces,
+        projectExpanded: true,
+        activeThreadKey: "thread:thread-2",
+        workspaceExpandedById: {
+          [workspaces[0]?.id ?? ""]: false,
+        },
+        getThreadKey: (thread) => `thread:${thread.id}`,
+      }),
+    ).toEqual([]);
   });
 });
 

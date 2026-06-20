@@ -49,7 +49,21 @@ export function resolveThreadActionProjectRef(
   return context.defaultProjectRef;
 }
 
-function buildContextualThreadOptions(context: ChatThreadActionContext): NewThreadOptions {
+function sameProjectRef(left: ScopedProjectRef, right: ScopedProjectRef): boolean {
+  return left.environmentId === right.environmentId && left.projectId === right.projectId;
+}
+
+function buildContextualThreadOptions(
+  context: ChatThreadActionContext,
+  projectRef?: ScopedProjectRef,
+): NewThreadOptions {
+  if (projectRef) {
+    const contextProjectRef = resolveThreadActionProjectRef(context);
+    if (!contextProjectRef || !sameProjectRef(contextProjectRef, projectRef)) {
+      return buildDefaultThreadOptions(context);
+    }
+  }
+
   return {
     branch: context.activeThread?.branch ?? context.activeDraftThread?.branch ?? null,
     worktreePath:
@@ -62,6 +76,8 @@ function buildContextualThreadOptions(context: ChatThreadActionContext): NewThre
 
 function buildDefaultThreadOptions(context: ChatThreadActionContext): NewThreadOptions {
   return {
+    branch: null,
+    worktreePath: null,
     envMode: context.defaultThreadEnvMode,
   };
 }
@@ -70,7 +86,7 @@ export async function startNewThreadInProjectFromContext(
   context: ChatThreadActionContext,
   projectRef: ScopedProjectRef,
 ): Promise<void> {
-  await context.handleNewThread(projectRef, buildContextualThreadOptions(context));
+  await context.handleNewThread(projectRef, buildContextualThreadOptions(context, projectRef));
 }
 
 export async function startNewThreadFromContext(

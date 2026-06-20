@@ -189,6 +189,37 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.modelSelection).toEqual(baseThread.modelSelection);
       }
     });
+
+    it("preserves worktree identity when stale local metadata arrives", () => {
+      const worktreeThread: OrchestrationThread = {
+        ...baseThread,
+        branch: "t3code/generated-worktree",
+        worktreePath: "/tmp/provider-project-worktree",
+      };
+
+      const result = applyThreadDetailEvent(worktreeThread, {
+        ...baseEventFields,
+        sequence: 6,
+        occurredAt: "2026-04-01T06:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          title: "Updated Title",
+          branch: "feat/enhancements",
+          worktreePath: null,
+          updatedAt: "2026-04-01T06:00:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.title).toBe("Updated Title");
+        expect(result.thread.branch).toBe("t3code/generated-worktree");
+        expect(result.thread.worktreePath).toBe("/tmp/provider-project-worktree");
+      }
+    });
   });
 
   describe("thread.message-sent", () => {

@@ -121,6 +121,57 @@ export function reconcileRetainedMountedThreadIds(input: {
   return nextThreadIds;
 }
 
+function normalizedWorkspaceContextValue(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+function workspaceExecutionContextKey(input: {
+  branch: string | null;
+  worktreePath: string | null;
+}): string {
+  const worktreePath = normalizedWorkspaceContextValue(input.worktreePath);
+  if (worktreePath) {
+    return `worktree:${worktreePath}`;
+  }
+  const branch = normalizedWorkspaceContextValue(input.branch);
+  if (branch) {
+    return `branch:${branch}`;
+  }
+  return "local";
+}
+
+export function resolveWorkspaceScopedThreadRef<
+  TThread extends {
+    id: ThreadId;
+    environmentId: EnvironmentId;
+    projectId: ProjectId;
+    branch: string | null;
+    worktreePath: string | null;
+    createdAt: string;
+  },
+>(input: { activeThread: TThread; threads: ReadonlyArray<TThread> }): ScopedThreadRef {
+  const activeContextKey = workspaceExecutionContextKey(input.activeThread);
+  const owner =
+    input.threads
+      .filter(
+        (thread) =>
+          thread.environmentId === input.activeThread.environmentId &&
+          thread.projectId === input.activeThread.projectId &&
+          workspaceExecutionContextKey(thread) === activeContextKey,
+      )
+      .sort((left, right) =>
+        left.createdAt === right.createdAt
+          ? left.id.localeCompare(right.id)
+          : left.createdAt.localeCompare(right.createdAt),
+      )[0] ?? input.activeThread;
+
+  return {
+    environmentId: owner.environmentId,
+    threadId: owner.id,
+  };
+}
+
 export function revokeBlobPreviewUrl(previewUrl: string | undefined): void {
   if (!previewUrl || typeof URL === "undefined" || !previewUrl.startsWith("blob:")) {
     return;

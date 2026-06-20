@@ -35,6 +35,13 @@ const activityOrder = O.combineAll<OrchestrationThreadActivity>([
   O.mapInput(O.String, (a) => a.id),
 ]);
 
+function shouldPreserveExistingWorktreeIdentity(
+  thread: Pick<OrchestrationThread, "worktreePath">,
+  payload: { readonly worktreePath?: string | null | undefined },
+): boolean {
+  return thread.worktreePath !== null && payload.worktreePath === null;
+}
+
 /**
  * Apply a single orchestration event to an `OrchestrationThread`, returning
  * the updated thread, a deletion signal, or an "unchanged" marker when the
@@ -101,7 +108,11 @@ export function applyThreadDetailEvent(
       };
 
     // ── Thread metadata ─────────────────────────────────────────────
-    case "thread.meta-updated":
+    case "thread.meta-updated": {
+      const preserveWorktreeIdentity = shouldPreserveExistingWorktreeIdentity(
+        thread,
+        event.payload,
+      );
       return {
         kind: "updated",
         thread: {
@@ -110,13 +121,16 @@ export function applyThreadDetailEvent(
           ...(event.payload.modelSelection !== undefined
             ? { modelSelection: event.payload.modelSelection }
             : {}),
-          ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
-          ...(event.payload.worktreePath !== undefined
+          ...(!preserveWorktreeIdentity && event.payload.branch !== undefined
+            ? { branch: event.payload.branch }
+            : {}),
+          ...(!preserveWorktreeIdentity && event.payload.worktreePath !== undefined
             ? { worktreePath: event.payload.worktreePath }
             : {}),
           updatedAt: event.payload.updatedAt,
         },
       };
+    }
 
     case "thread.runtime-mode-set":
       return {

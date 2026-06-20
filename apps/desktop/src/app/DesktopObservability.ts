@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import type * as LogLevel from "effect/LogLevel";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
@@ -44,6 +45,28 @@ export class DesktopBackendOutputLog extends Context.Service<
   DesktopBackendOutputLog,
   DesktopBackendOutputLogShape
 >()("@t3tools/desktop/app/DesktopObservability/DesktopBackendOutputLog") {}
+
+export interface BestEffortWritableStream {
+  readonly destroyed?: boolean;
+  readonly writable?: boolean;
+  readonly once?: (event: "error", listener: (error: unknown) => void) => unknown;
+  readonly off?: (event: "error", listener: (error: unknown) => void) => unknown;
+  readonly write: (chunk: Uint8Array, callback?: (error?: Error | null) => void) => boolean | void;
+}
+
+export interface DesktopConsoleLogStreams {
+  readonly stdout: BestEffortWritableStream;
+  readonly stderr: BestEffortWritableStream;
+}
+
+export interface DesktopConsoleLogRecord {
+  readonly date: Date;
+  readonly logLevel: LogLevel.LogLevel;
+  readonly message: unknown;
+  readonly fiberId?: string | number;
+  readonly annotations?: DesktopLogAnnotations;
+  readonly causeText?: string;
+}
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -260,14 +283,136 @@ const resolveOtlpTracesUrl = Effect.gen(function* () {
   return yield* readPersistedOtlpTracesUrl;
 });
 
+function isWritableBrokenPipeError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { readonly code?: unknown }).code === "EPIPE"
+  );
+}
+
+export const writeNodeStreamBestEffort = (
+  stream: BestEffortWritableStream,
+  chunk: Uint8Array,
+): Effect.Effect<void> =>
+  Effect.sync(() => {
+    writeNodeStreamBestEffortSync(stream, chunk);
+  }).pipe(Effect.ignore);
+
+export function writeNodeStreamBestEffortSync(
+  stream: BestEffortWritableStream,
+  chunk: Uint8Array,
+): void {
+  if (stream.destroyed === true || stream.writable === false) {
+    return;
+  }
+
+  const supportsErrorListener =
+    typeof stream.once === "function" && typeof stream.off === "function";
+  let detachErrorListener: (() => void) | undefined;
+  const scheduleDetachErrorListener = () => {
+    queueMicrotask(() => {
+      detachErrorListener?.();
+    });
+  };
+  const onError = (_error: unknown) => {
+    detachErrorListener?.();
+  };
+
+  try {
+    if (supportsErrorListener) {
+      stream.once?.("error", onError);
+      detachErrorListener = () => {
+        stream.off?.("error", onError);
+        detachErrorListener = undefined;
+      };
+    }
+
+    stream.write(chunk, (_error?: Error | null) => {
+      scheduleDetachErrorListener();
+    });
+  } catch (error) {
+    detachErrorListener?.();
+    if (!isWritableBrokenPipeError(error)) {
+      return;
+    }
+  }
+}
+
+const formatDesktopLoggerValue = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.stack ?? value.message;
+
+  try {
+    const encoded = JSON.stringify(value);
+    return encoded ?? String(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const formatDesktopLoggerMessage = (message: unknown): string => {
+  if (!Array.isArray(message)) {
+    return formatDesktopLoggerValue(message);
+  }
+  return message.map(formatDesktopLoggerValue).join(" ");
+};
+
+const shouldWriteDesktopLogToStderr = (logLevel: LogLevel.LogLevel): boolean =>
+  logLevel === "Fatal" || logLevel === "Error" || logLevel === "Warn";
+
+export function formatDesktopConsoleLogRecord(input: DesktopConsoleLogRecord): string {
+  const chunks = [
+    `[${input.date.toISOString()}]`,
+    input.logLevel.toUpperCase(),
+    input.fiberId === undefined ? undefined : `(#${input.fiberId})`,
+    formatDesktopLoggerMessage(input.message),
+  ].filter((chunk): chunk is string => typeof chunk === "string" && chunk.length > 0);
+
+  const annotations = Object.entries(input.annotations ?? {});
+  for (const [key, value] of annotations) {
+    chunks.push(`${key}=${formatDesktopLoggerValue(value)}`);
+  }
+
+  if (input.causeText !== undefined && input.causeText.length > 0) {
+    chunks.push(`cause=${input.causeText}`);
+  }
+
+  return `${chunks.join(" ")}\n`;
+}
+
+export function writeDesktopConsoleLogRecordSync(
+  input: DesktopConsoleLogRecord,
+  streams: DesktopConsoleLogStreams = {
+    stdout: process.stdout,
+    stderr: process.stderr,
+  },
+): void {
+  const stream = shouldWriteDesktopLogToStderr(input.logLevel) ? streams.stderr : streams.stdout;
+  writeNodeStreamBestEffortSync(stream, textEncoder.encode(formatDesktopConsoleLogRecord(input)));
+}
+
+const desktopConsoleLogger = Logger.make<unknown, void>(
+  ({ cause, date, fiber, logLevel, message }) => {
+    const causeText = cause.reasons.length === 0 ? undefined : formatDesktopLoggerValue(cause);
+
+    writeDesktopConsoleLogRecordSync({
+      date,
+      logLevel,
+      message,
+      fiberId: fiber.id,
+      annotations: fiber.getRef(References.CurrentLogAnnotations),
+      ...(causeText === undefined ? {} : { causeText }),
+    });
+  },
+);
+
 const writeDevelopmentConsoleOutput = (
   streamName: "stdout" | "stderr",
   chunk: Uint8Array,
 ): Effect.Effect<void> =>
-  Effect.sync(() => {
-    const output = streamName === "stderr" ? process.stderr : process.stdout;
-    output.write(chunk);
-  }).pipe(Effect.ignore);
+  writeNodeStreamBestEffort(streamName === "stderr" ? process.stderr : process.stdout, chunk);
 
 const writeBackendChildLogRecord = Effect.fn("desktop.observability.writeBackendChildLogRecord")(
   function* (
@@ -345,7 +490,7 @@ const backendOutputLogLayer = Layer.effect(
 );
 
 const desktopLoggerLayer = Layer.mergeAll(
-  Logger.layer([Logger.consolePretty(), Logger.tracerLogger], { mergeWithExisting: false }),
+  Logger.layer([desktopConsoleLogger, Logger.tracerLogger], { mergeWithExisting: false }),
   Layer.succeed(References.MinimumLogLevel, "Info"),
 );
 

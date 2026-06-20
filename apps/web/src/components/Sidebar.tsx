@@ -177,6 +177,9 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
 import {
   getSidebarThreadIdsToPrewarm,
+  buildDefaultWorkspacesForThreads,
+  getVisibleWorkspaceSidebarThreadKeys,
+  getVisibleWorkspaceThreads,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   isTrailingDoubleClick,
@@ -190,6 +193,7 @@ import {
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
   ThreadStatusPill,
+  type SidebarDefaultWorkspace,
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
@@ -226,6 +230,7 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   easing: "ease-out",
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
+const WORKSPACE_LAYOUT_ENABLED = import.meta.env.VITE_T3CODE_WORKSPACE_LAYOUT === "1";
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
   repository_path: "Group by repository path",
@@ -1042,6 +1047,208 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   );
 });
 
+interface SidebarProjectWorkspaceListProps extends Omit<
+  SidebarProjectThreadListProps,
+  | "hasOverflowingThreads"
+  | "hiddenThreadStatus"
+  | "renderedThreads"
+  | "showEmptyThreadState"
+  | "shouldShowThreadPanel"
+  | "isThreadListExpanded"
+  | "expandThreadListForProject"
+  | "collapseThreadListForProject"
+> {
+  projectExpanded: boolean;
+  workspaces: readonly SidebarDefaultWorkspace<SidebarThreadSummary>[];
+  workspaceExpandedById: Readonly<Record<string, boolean>>;
+  onWorkspaceExpandedChange: (workspaceId: string, expanded: boolean) => void;
+  onCreateThreadInWorkspace: (
+    event: React.MouseEvent<HTMLButtonElement>,
+    workspace: SidebarDefaultWorkspace<SidebarThreadSummary>,
+  ) => void;
+}
+
+const SidebarProjectWorkspaceList = memo(function SidebarProjectWorkspaceList(
+  props: SidebarProjectWorkspaceListProps,
+) {
+  const {
+    projectExpanded,
+    workspaces,
+    workspaceExpandedById,
+    onWorkspaceExpandedChange,
+    onCreateThreadInWorkspace,
+    orderedProjectThreadKeys,
+    projectCwd,
+    activeRouteThreadKey,
+    threadJumpLabelByKey,
+    appSettingsConfirmThreadArchive,
+    renamingThreadKey,
+    renamingTitle,
+    setRenamingTitle,
+    startThreadRename,
+    renamingInputRef,
+    renamingCommittedRef,
+    confirmingArchiveThreadKey,
+    setConfirmingArchiveThreadKey,
+    confirmArchiveButtonRefs,
+    attachThreadListAutoAnimateRef,
+    handleThreadClick,
+    navigateToThread,
+    handleMultiSelectContextMenu,
+    handleThreadContextMenu,
+    clearSelection,
+    commitRename,
+    cancelRename,
+    attemptArchiveThread,
+    openPrLink,
+  } = props;
+
+  return (
+    <SidebarMenuSub
+      ref={attachThreadListAutoAnimateRef}
+      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1 py-0 sm:mx-1 sm:px-1.5"
+    >
+      {projectExpanded && workspaces.length === 0 ? (
+        <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
+          <div
+            data-thread-selection-safe
+            className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
+          >
+            <span>No workspaces yet</span>
+          </div>
+        </SidebarMenuSubItem>
+      ) : null}
+      {workspaces.map((workspace) => {
+        const activeThread = workspace.threads.find(
+          (thread) =>
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
+            activeRouteThreadKey,
+        );
+        if (!projectExpanded && !activeThread) {
+          return null;
+        }
+
+        const workspaceExpanded = workspaceExpandedById[workspace.id] ?? true;
+        const workspaceThreads = getVisibleWorkspaceThreads({
+          threads: workspace.threads,
+          workspaceExpanded,
+        });
+        const workspaceStatus = resolveProjectStatusIndicator(
+          workspace.threads.map((thread) => resolveThreadStatusPill({ thread })),
+        );
+        const workspaceLabel =
+          workspace.branch && workspace.branch !== workspace.title ? workspace.branch : null;
+
+        return (
+          <React.Fragment key={workspace.id}>
+            <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
+              <div className="group/workspace-row relative flex h-6 w-full min-w-0 items-center gap-1 rounded-md pr-7 text-left hover:bg-accent sm:h-7">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={`${workspaceExpanded ? "Collapse" : "Expand"} ${workspace.title}`}
+                        data-thread-selection-safe
+                        className="inline-flex h-6 min-w-5 cursor-pointer items-center justify-center text-muted-foreground/70 hover:text-foreground"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onWorkspaceExpandedChange(workspace.id, !workspaceExpanded);
+                        }}
+                      />
+                    }
+                  >
+                    <ChevronRightIcon
+                      className={`size-3.5 transition-transform duration-150 ${
+                        workspaceExpanded ? "rotate-90" : ""
+                      }`}
+                    />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    {workspaceExpanded ? "Collapse workspace" : "Expand workspace"}
+                  </TooltipPopup>
+                </Tooltip>
+                <button
+                  type="button"
+                  data-thread-selection-safe
+                  aria-expanded={workspaceExpanded}
+                  aria-label={`${workspaceExpanded ? "Collapse" : "Expand"} ${workspace.title}`}
+                  className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onWorkspaceExpandedChange(workspace.id, !workspaceExpanded);
+                  }}
+                >
+                  {workspaceStatus ? <ThreadStatusLabel status={workspaceStatus} compact /> : null}
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground/85">
+                    {workspace.title}
+                  </span>
+                  {workspaceLabel ? (
+                    <span className="max-w-[6rem] shrink truncate text-[10px] text-muted-foreground/60">
+                      {workspaceLabel}
+                    </span>
+                  ) : null}
+                </button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={`Create new chat in ${workspace.title}`}
+                        data-thread-selection-safe
+                        className={`${SIDEBAR_ICON_ACTION_BUTTON_CLASS} absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:opacity-100 group-hover/workspace-row:opacity-100 group-focus-within/workspace-row:opacity-100`}
+                        onClick={(event) => onCreateThreadInWorkspace(event, workspace)}
+                      />
+                    }
+                  >
+                    <SquarePenIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">New chat</TooltipPopup>
+                </Tooltip>
+              </div>
+            </SidebarMenuSubItem>
+            {workspaceThreads.map((thread) => {
+              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+              return (
+                <div key={threadKey} className="pl-3">
+                  <SidebarThreadRow
+                    thread={thread}
+                    projectCwd={projectCwd}
+                    orderedProjectThreadKeys={orderedProjectThreadKeys}
+                    isActive={activeRouteThreadKey === threadKey}
+                    jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
+                    appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+                    renamingThreadKey={renamingThreadKey}
+                    renamingTitle={renamingTitle}
+                    setRenamingTitle={setRenamingTitle}
+                    startThreadRename={startThreadRename}
+                    renamingInputRef={renamingInputRef}
+                    renamingCommittedRef={renamingCommittedRef}
+                    confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+                    setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+                    confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+                    handleThreadClick={handleThreadClick}
+                    navigateToThread={navigateToThread}
+                    handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+                    handleThreadContextMenu={handleThreadContextMenu}
+                    clearSelection={clearSelection}
+                    commitRename={commitRename}
+                    cancelRename={cancelRename}
+                    attemptArchiveThread={attemptArchiveThread}
+                    openPrLink={openPrLink}
+                  />
+                </div>
+              );
+            })}
+          </React.Fragment>
+        );
+      })}
+    </SidebarMenuSub>
+  );
+});
+
 interface SidebarProjectItemProps {
   project: SidebarProjectSnapshot;
   isThreadListExpanded: boolean;
@@ -1199,6 +1406,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const projectExpanded = useUiStateStore((state) =>
     resolveProjectExpanded(state.projectExpandedById, projectPreferenceKeys),
   );
+  const workspaceExpandedById = useUiStateStore((state) => state.projectExpandedById);
   const threadLastVisitedAts = useUiStateStore(
     useShallow((state) =>
       projectThreads.map(
@@ -1357,6 +1565,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     threadLastVisitedAts,
     visibleProjectThreads,
   ]);
+  const defaultWorkspaces = useMemo(
+    () =>
+      buildDefaultWorkspacesForThreads({
+        projectKey: project.projectKey,
+        threads: visibleProjectThreads,
+        getThreadKey: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      }),
+    [project.projectKey, visibleProjectThreads],
+  );
 
   const handleProjectButtonClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1960,6 +2177,58 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [createThreadForProjectMember, project.groupedProjectCount, project.memberProjects],
   );
 
+  const handleWorkspaceExpandedChange = useCallback(
+    (workspaceId: string, expanded: boolean) => {
+      setProjectExpanded(workspaceId, expanded);
+    },
+    [setProjectExpanded],
+  );
+
+  const handleCreateThreadInWorkspace = useCallback(
+    (
+      event: React.MouseEvent<HTMLButtonElement>,
+      workspace: SidebarDefaultWorkspace<SidebarThreadSummary>,
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const sourceThread = workspace.threads[0];
+      if (!sourceThread) {
+        return;
+      }
+      const member = memberProjectByScopedKey.get(
+        scopedProjectKey(scopeProjectRef(sourceThread.environmentId, sourceThread.projectId)),
+      );
+      if (!member) {
+        return;
+      }
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+
+      void (async () => {
+        const result = await settlePromise(() =>
+          handleNewThread(scopeProjectRef(member.environmentId, member.id), {
+            branch: workspace.branch,
+            worktreePath: workspace.worktreePath,
+            envMode: workspace.worktreePath ? "worktree" : "local",
+          }),
+        );
+        if (result._tag === "Failure") {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not create chat",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [handleNewThread, isMobile, memberProjectByScopedKey, setOpenMobile],
+  );
+
   const attemptArchiveThread = useCallback(
     async (threadRef: ScopedThreadRef) => {
       const result = await archiveThread(threadRef);
@@ -2298,42 +2567,77 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         </Tooltip>
       </div>
 
-      <SidebarProjectThreadList
-        projectKey={project.projectKey}
-        projectExpanded={projectExpanded}
-        hasOverflowingThreads={hasOverflowingThreads}
-        hiddenThreadStatus={hiddenThreadStatus}
-        orderedProjectThreadKeys={orderedProjectThreadKeys}
-        renderedThreads={renderedThreads}
-        showEmptyThreadState={showEmptyThreadState}
-        shouldShowThreadPanel={shouldShowThreadPanel}
-        isThreadListExpanded={isThreadListExpanded}
-        projectCwd={project.workspaceRoot}
-        activeRouteThreadKey={activeRouteThreadKey}
-        threadJumpLabelByKey={threadJumpLabelByKey}
-        appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
-        renamingThreadKey={renamingThreadKey}
-        renamingTitle={renamingTitle}
-        setRenamingTitle={setRenamingTitle}
-        startThreadRename={startThreadRename}
-        renamingInputRef={renamingInputRef}
-        renamingCommittedRef={renamingCommittedRef}
-        confirmingArchiveThreadKey={confirmingArchiveThreadKey}
-        setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
-        confirmArchiveButtonRefs={confirmArchiveButtonRefs}
-        attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-        handleThreadClick={handleThreadClick}
-        navigateToThread={navigateToThread}
-        handleMultiSelectContextMenu={handleMultiSelectContextMenu}
-        handleThreadContextMenu={handleThreadContextMenu}
-        clearSelection={clearSelection}
-        commitRename={commitRename}
-        cancelRename={cancelRename}
-        attemptArchiveThread={attemptArchiveThread}
-        openPrLink={openPrLink}
-        expandThreadListForProject={expandThreadListForProject}
-        collapseThreadListForProject={collapseThreadListForProject}
-      />
+      {WORKSPACE_LAYOUT_ENABLED ? (
+        <SidebarProjectWorkspaceList
+          projectKey={project.projectKey}
+          projectExpanded={projectExpanded}
+          orderedProjectThreadKeys={orderedProjectThreadKeys}
+          projectCwd={project.workspaceRoot}
+          activeRouteThreadKey={activeRouteThreadKey}
+          threadJumpLabelByKey={threadJumpLabelByKey}
+          appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+          renamingThreadKey={renamingThreadKey}
+          renamingTitle={renamingTitle}
+          setRenamingTitle={setRenamingTitle}
+          startThreadRename={startThreadRename}
+          renamingInputRef={renamingInputRef}
+          renamingCommittedRef={renamingCommittedRef}
+          confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+          setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+          confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+          attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+          handleThreadClick={handleThreadClick}
+          navigateToThread={navigateToThread}
+          handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+          handleThreadContextMenu={handleThreadContextMenu}
+          clearSelection={clearSelection}
+          commitRename={commitRename}
+          cancelRename={cancelRename}
+          attemptArchiveThread={attemptArchiveThread}
+          openPrLink={openPrLink}
+          workspaces={defaultWorkspaces}
+          workspaceExpandedById={workspaceExpandedById}
+          onWorkspaceExpandedChange={handleWorkspaceExpandedChange}
+          onCreateThreadInWorkspace={handleCreateThreadInWorkspace}
+        />
+      ) : (
+        <SidebarProjectThreadList
+          projectKey={project.projectKey}
+          projectExpanded={projectExpanded}
+          hasOverflowingThreads={hasOverflowingThreads}
+          hiddenThreadStatus={hiddenThreadStatus}
+          orderedProjectThreadKeys={orderedProjectThreadKeys}
+          renderedThreads={renderedThreads}
+          showEmptyThreadState={showEmptyThreadState}
+          shouldShowThreadPanel={shouldShowThreadPanel}
+          isThreadListExpanded={isThreadListExpanded}
+          projectCwd={project.workspaceRoot}
+          activeRouteThreadKey={activeRouteThreadKey}
+          threadJumpLabelByKey={threadJumpLabelByKey}
+          appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+          renamingThreadKey={renamingThreadKey}
+          renamingTitle={renamingTitle}
+          setRenamingTitle={setRenamingTitle}
+          startThreadRename={startThreadRename}
+          renamingInputRef={renamingInputRef}
+          renamingCommittedRef={renamingCommittedRef}
+          confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+          setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+          confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+          attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+          handleThreadClick={handleThreadClick}
+          navigateToThread={navigateToThread}
+          handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+          handleThreadContextMenu={handleThreadContextMenu}
+          clearSelection={clearSelection}
+          commitRename={commitRename}
+          cancelRename={cancelRename}
+          attemptArchiveThread={attemptArchiveThread}
+          openPrLink={openPrLink}
+          expandThreadListForProject={expandThreadListForProject}
+          collapseThreadListForProject={collapseThreadListForProject}
+        />
+      )}
 
       <Dialog
         open={projectRenameTarget !== null}
@@ -3310,6 +3614,23 @@ export default function Sidebar() {
           projectExpansionPreferenceKeys(project),
         );
         const activeThreadKey = routeThreadKey ?? undefined;
+        if (WORKSPACE_LAYOUT_ENABLED) {
+          const workspaces = buildDefaultWorkspacesForThreads({
+            projectKey: project.projectKey,
+            threads: projectThreads,
+            getThreadKey: (thread) =>
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          });
+          return getVisibleWorkspaceSidebarThreadKeys({
+            workspaces,
+            projectExpanded,
+            activeThreadKey: activeThreadKey ?? null,
+            workspaceExpandedById: projectExpandedById,
+            getThreadKey: (thread) =>
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          });
+        }
+
         const pinnedCollapsedThread =
           !projectExpanded && activeThreadKey
             ? (projectThreads.find(

@@ -9,6 +9,7 @@ import {
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
+import { resolveDefaultWorkspaceTitle } from "./WorkspacePresentation.logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -477,6 +478,128 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
     hiddenThreads: threads.filter((thread) => !visibleThreadIds.has(thread.id)),
     visibleThreads: threads.filter((thread) => visibleThreadIds.has(thread.id)),
   };
+}
+
+export interface SidebarDefaultWorkspace<TThread> {
+  id: string;
+  projectKey: string;
+  title: string;
+  branch: string | null;
+  worktreePath: string | null;
+  lastActiveThreadKey: string;
+  threads: readonly TThread[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+function normalizeWorkspaceContextValue(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+function defaultWorkspaceContextKey(input: {
+  branch: string | null;
+  worktreePath: string | null;
+}): string {
+  const branch = normalizeWorkspaceContextValue(input.branch);
+  const worktreePath = normalizeWorkspaceContextValue(input.worktreePath);
+  if (worktreePath) {
+    return `worktree:${worktreePath}`;
+  }
+  if (branch) {
+    return `branch:${branch}`;
+  }
+  return "local";
+}
+
+function minIsoTimestamp(left: string, right: string): string {
+  return left <= right ? left : right;
+}
+
+function maxIsoTimestamp(left: string, right: string): string {
+  return left >= right ? left : right;
+}
+
+export function buildDefaultWorkspacesForThreads<
+  TThread extends {
+    id: Thread["id"];
+    title: string;
+    branch: string | null;
+    worktreePath: string | null;
+    createdAt: string;
+    updatedAt: string;
+  },
+>(input: {
+  projectKey: string;
+  threads: readonly TThread[];
+  getThreadKey: (thread: TThread) => string;
+}): SidebarDefaultWorkspace<TThread>[] {
+  const workspaceByContextKey = new Map<string, SidebarDefaultWorkspace<TThread>>();
+
+  for (const thread of input.threads) {
+    const threadKey = input.getThreadKey(thread);
+    const contextKey = defaultWorkspaceContextKey({
+      branch: thread.branch,
+      worktreePath: thread.worktreePath,
+    });
+    const existing = workspaceByContextKey.get(contextKey);
+    if (existing) {
+      workspaceByContextKey.set(contextKey, {
+        ...existing,
+        threads: [...existing.threads, thread],
+        createdAt: minIsoTimestamp(existing.createdAt, thread.createdAt),
+        updatedAt: maxIsoTimestamp(existing.updatedAt, thread.updatedAt),
+      });
+      continue;
+    }
+
+    workspaceByContextKey.set(contextKey, {
+      id: `${input.projectKey}:workspace:${contextKey}`,
+      projectKey: input.projectKey,
+      title: resolveDefaultWorkspaceTitle({
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+      }),
+      branch: thread.branch,
+      worktreePath: thread.worktreePath,
+      lastActiveThreadKey: threadKey,
+      threads: [thread],
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+    });
+  }
+
+  return Array.from(workspaceByContextKey.values());
+}
+
+export function getVisibleWorkspaceThreads<TThread>(input: {
+  threads: readonly TThread[];
+  workspaceExpanded: boolean;
+}): readonly TThread[] {
+  return input.workspaceExpanded ? input.threads : [];
+}
+
+export function getVisibleWorkspaceSidebarThreadKeys<TThread>(input: {
+  workspaces: readonly SidebarDefaultWorkspace<TThread>[];
+  projectExpanded: boolean;
+  activeThreadKey: string | null;
+  workspaceExpandedById: Readonly<Record<string, boolean>>;
+  getThreadKey: (thread: TThread) => string;
+}): string[] {
+  return input.workspaces.flatMap((workspace) => {
+    const hasActiveThread =
+      input.activeThreadKey !== null &&
+      workspace.threads.some((thread) => input.getThreadKey(thread) === input.activeThreadKey);
+    if (!input.projectExpanded && !hasActiveThread) {
+      return [];
+    }
+
+    const workspaceExpanded = input.workspaceExpandedById[workspace.id] ?? true;
+    return getVisibleWorkspaceThreads({
+      threads: workspace.threads,
+      workspaceExpanded,
+    }).map(input.getThreadKey);
+  });
 }
 
 export function getFallbackThreadIdAfterDelete<

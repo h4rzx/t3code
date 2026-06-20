@@ -205,6 +205,65 @@ describe("orchestration projector", () => {
     expect(unarchived.threads[0]?.archivedAt).toBeNull();
   });
 
+  it("preserves worktree identity when stale local metadata arrives", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const later = "2026-01-01T00:00:01.000Z";
+    const worktreePath = "/tmp/provider-project-worktree";
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: "t3code/generated-worktree",
+            worktreePath,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    const updated = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "thread.meta-updated",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: later,
+          commandId: "cmd-stale-local-meta",
+          payload: {
+            threadId: "thread-1",
+            title: "Updated title",
+            branch: "feat/enhancements",
+            worktreePath: null,
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    expect(updated.threads[0]?.title).toBe("Updated title");
+    expect(updated.threads[0]?.branch).toBe("t3code/generated-worktree");
+    expect(updated.threads[0]?.worktreePath).toBe(worktreePath);
+  });
+
   it("keeps projector forward-compatible for unhandled event types", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);
@@ -906,13 +965,11 @@ describe("orchestration projector", () => {
           },
         }),
     );
-    const afterMessages = await messageEvents.reduce<
-      Promise<ReturnType<typeof createEmptyReadModel>>
-    >(
-      (statePromise, event) =>
-        statePromise.then((state) => Effect.runPromise(projectEvent(state, event))),
-      Promise.resolve(afterCreate),
-    );
+    let afterMessages = afterCreate;
+    for (const event of messageEvents) {
+      // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- This legacy vite-plus suite is not an @effect/vitest layer suite.
+      afterMessages = Effect.runSync(projectEvent(afterMessages, event));
+    }
 
     const checkpointEvents: ReadonlyArray<OrchestrationEvent> = Array.from(
       { length: 600 },
@@ -936,13 +993,11 @@ describe("orchestration projector", () => {
           },
         }),
     );
-    const finalState = await checkpointEvents.reduce<
-      Promise<ReturnType<typeof createEmptyReadModel>>
-    >(
-      (statePromise, event) =>
-        statePromise.then((state) => Effect.runPromise(projectEvent(state, event))),
-      Promise.resolve(afterMessages),
-    );
+    let finalState = afterMessages;
+    for (const event of checkpointEvents) {
+      // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- This legacy vite-plus suite is not an @effect/vitest layer suite.
+      finalState = Effect.runSync(projectEvent(finalState, event));
+    }
 
     const thread = finalState.threads[0];
     expect(thread?.messages).toHaveLength(2_000);

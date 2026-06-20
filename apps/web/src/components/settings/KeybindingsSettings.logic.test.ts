@@ -5,6 +5,7 @@ import {
   buildKeybindingRows,
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
+  commandDescription,
   commandLabel,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
@@ -123,6 +124,12 @@ describe("KeybindingsSettings.logic", () => {
   it("formats static and project script command labels", () => {
     expect(commandLabel("commandPalette.toggle")).toBe("Command Palette: Toggle");
     expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
+  });
+
+  it("describes chat creation commands with workspace context behavior", () => {
+    expect(commandDescription("chat.new")).toContain("preserving branch/worktree");
+    expect(commandDescription("chat.newLocal")).toContain("branch/worktree cleared");
+    expect(commandDescription("terminal.toggle")).toBeNull();
   });
 
   it("builds known when variable options from defaults without frontend labels", () => {

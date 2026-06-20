@@ -64,10 +64,12 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `preview.zoomOut`: zoom the preview viewport out one step (in focused preview context by default)
 - `preview.resetZoom`: reset the preview zoom to 100% (in focused preview context by default)
 - `commandPalette.toggle`: open or close the global command palette
-- `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
-- `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
+- `chat.new`: create a new chat thread in the active context, preserving the current branch/worktree when the target is the current project
+- `chat.newLocal`: create a new chat thread for the active project with branch/worktree cleared and the app's default new-thread environment mode
 - `editor.openFavorite`: open current project/worktree in the last-used editor
 - `script.{id}.run`: run a project script by id (for example `script.test.run`)
+
+In the command palette, **New chat in...** starts from the selected project. If that project differs from the active chat's project, T3 Code clears the active branch/worktree context so the new draft is created under the selected project.
 
 ### Key Syntax
 

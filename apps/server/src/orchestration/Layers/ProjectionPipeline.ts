@@ -48,6 +48,7 @@ import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
+import { resolveThreadWorkspaceIdentityPatch } from "../threadWorkspaceIdentity.ts";
 import {
   attachmentRelativePath,
   parseAttachmentIdFromRelativePath,
@@ -658,10 +659,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.modelSelection !== undefined
               ? { modelSelection: event.payload.modelSelection }
               : {}),
-            ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
-            ...(event.payload.worktreePath !== undefined
-              ? { worktreePath: event.payload.worktreePath }
-              : {}),
+            ...resolveThreadWorkspaceIdentityPatch(existingRow.value, event.payload),
             updatedAt: event.payload.updatedAt,
           });
           return;
