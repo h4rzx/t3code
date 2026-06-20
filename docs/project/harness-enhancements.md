@@ -18,6 +18,7 @@ This tracks planned improvements to make T3 Code a stronger harness around codin
 | P1       | T3 Code harness prompt injection                  | Not started     | Teaches Codex, Claude, Cursor, and OpenCode how to behave inside T3 Code workspaces instead of acting like raw CLIs.              |
 | P1       | Context and task update reactor                   | Not started     | Keeps `.context` and task state useful after meaningful turns without asking users to manually summarize state.                   |
 | P1       | Action-specific prompts                           | Not started     | Makes UI actions such as review, PR creation, fix checks, and handoff more consistent.                                            |
+| P1       | Source-control action target resolution           | Not started     | Ensures commit, push, and PR actions target the checked-out repository/branch instead of the wrong fork or upstream remote.       |
 | P1       | Workspace lifecycle dashboard                     | Not started     | Makes the workspace/worktree/branch/terminal/diff/PR lifecycle visible as one unit of work.                                       |
 | P1       | Integrated file editor and review surface         | Not started     | Gives users a Conductor-style file editor for inspecting, editing, and reviewing agent changes next to chat, diffs, and comments. |
 | P1       | File diff review improvements                     | Not started     | Makes large diffs easier to navigate, filter, comment on, and hand back to agents.                                                |
@@ -470,6 +471,44 @@ Initial implementation notes:
 - Store prompt templates in a server module or checked-in prompt directory.
 - Expose repository/user overrides in settings after default prompts are stable.
 
+## P1: Source-Control Action Target Resolution
+
+Make commit, push, and PR creation resolve their target repository and refs from the active
+workspace checkout instead of relying on ambient GitHub CLI defaults.
+
+Problem to solve:
+
+- A checkout can have both `origin` and `upstream` remotes.
+- `gh repo view` may default to the upstream project even when the branch was pushed to the user's fork.
+- PR creation can fail with misleading provider errors such as "Head sha can't be blank",
+  "Base sha can't be blank", "No commits between main and branch", or "Head ref must be a branch"
+  even when the local branch and fork branch are valid.
+- Branch names can contain slashes, and worktrees can make the checked-out branch/ref context less obvious.
+
+Expected behavior:
+
+- T3 Code determines the intended source-control target from the selected workspace checkout and
+  project configuration, not from the global `gh` default repository.
+- Fork-only PRs target the checked-out fork explicitly.
+- Upstream contribution PRs use an explicit `owner:branch` head and upstream base repository.
+- Before creating a PR, T3 Code verifies the base ref, head ref, and ahead/behind counts against the
+  chosen repository pair.
+- The UI shows the resolved target before running a destructive or publishing action: repository,
+  base branch, head branch, and remote owner.
+- Failures include the resolved repository, base ref, head ref, remote URLs, and commit counts so the
+  user can see whether the issue is "wrong repo" versus "no commits".
+
+Initial implementation notes:
+
+- Add a source-control target resolver that normalizes `origin`, `upstream`, fork owner, base branch,
+  and head branch for the active workspace.
+- Use explicit repository flags for provider commands, for example `gh pr create --repo owner/repo`.
+- Use explicit head owner when creating cross-repository PRs, for example `--head owner:branch`.
+- Add tests for fork-only PR creation, upstream PR creation, slash-containing branch names, detached or
+  stale worktree metadata, missing remote head refs, and no-commit branches.
+- Keep commit and push preflights in the same resolver so "commit, push & PR" reports one coherent
+  target instead of resolving each step differently.
+
 ## P1: Workspace Lifecycle Dashboard
 
 Create a workspace-level overview that makes each active thread feel like one shippable unit.
@@ -658,10 +697,11 @@ Initial implementation notes:
 12. Add manual "Update handoff" and "Read workspace context" actions.
 13. Add deterministic context and task updates after turn completion.
 14. Add action-specific prompts for review and PR creation.
-15. Make changed-file clicks use the current integrated review surface by default.
-16. Add diff grouping, filters, collapse state, clearer turn labels, and per-file review state.
-17. Build the workspace lifecycle dashboard.
-18. Add the merge readiness checks panel.
-19. Persist structured review comments.
-20. Add issue/PR fanout.
-21. Design and build Spotlight-style root runner.
+15. Add source-control target resolution for commit, push, and PR actions.
+16. Make changed-file clicks use the current integrated review surface by default.
+17. Add diff grouping, filters, collapse state, clearer turn labels, and per-file review state.
+18. Build the workspace lifecycle dashboard.
+19. Add the merge readiness checks panel.
+20. Persist structured review comments.
+21. Add issue/PR fanout.
+22. Design and build Spotlight-style root runner.
