@@ -75,6 +75,7 @@ import {
   PreviewAutomationClickInput,
   PreviewAutomationEvaluateInput,
   PreviewAutomationOwner,
+  PreviewAutomationOwnerIdentity,
   PreviewAutomationPressInput,
   PreviewAutomationRequest,
   PreviewAutomationResponse,
@@ -414,23 +415,6 @@ export interface PickFolderOptions {
 export const PickFolderOptionsSchema = Schema.Struct({
   initialPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
-
-export const DesktopCloudAuthFetchInputSchema = Schema.Struct({
-  url: Schema.String,
-  method: Schema.optionalKey(Schema.String),
-  headers: Schema.Record(Schema.String, Schema.String),
-  body: Schema.optionalKey(Schema.String),
-});
-export type DesktopCloudAuthFetchInput = typeof DesktopCloudAuthFetchInputSchema.Type;
-
-export const DesktopCloudAuthFetchResultSchema = Schema.Struct({
-  ok: Schema.Boolean,
-  status: Schema.Number,
-  statusText: Schema.String,
-  headers: Schema.Record(Schema.String, Schema.String),
-  body: Schema.String,
-});
-export type DesktopCloudAuthFetchResult = typeof DesktopCloudAuthFetchResultSchema.Type;
 
 /**
  * Renderer-facing snapshot of a desktop preview tab. Mirrors the main-process
@@ -897,6 +881,7 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
+  getLocalEnvironmentBearerToken: () => Promise<string>;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
   getConnectionCatalog?: () => Promise<string | null>;
@@ -935,12 +920,6 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
-  createCloudAuthRequest: () => Promise<string>;
-  getCloudAuthToken: () => Promise<string | null>;
-  setCloudAuthToken: (token: string) => Promise<boolean>;
-  clearCloudAuthToken: () => Promise<void>;
-  fetchCloudAuth: (input: DesktopCloudAuthFetchInput) => Promise<DesktopCloudAuthFetchResult>;
-  onCloudAuthCallback: (listener: (rawUrl: string) => void) => () => void;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
@@ -1187,7 +1166,7 @@ export interface EnvironmentApi {
       ) => () => void;
       respond: (response: PreviewAutomationResponse) => Promise<void>;
       reportOwner: (owner: PreviewAutomationOwner) => Promise<void>;
-      clearOwner: (input: { clientId: string }) => Promise<void>;
+      clearOwner: (input: PreviewAutomationOwnerIdentity) => Promise<void>;
     };
     onEvent: (
       callback: (event: PreviewEvent) => void,

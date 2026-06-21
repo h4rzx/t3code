@@ -42,7 +42,7 @@ import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/ter
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import {
   isAtomCommandInterrupted,
@@ -55,7 +55,7 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -104,7 +104,7 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
-  selectActiveRightPanelKindWithUrl,
+  selectActiveRightPanel,
   selectActiveRightPanelSurface,
   selectThreadRightPanelState,
   type RightPanelSurface,
@@ -138,9 +138,10 @@ import {
 } from "~/projectScripts";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
-import { useSettings } from "../hooks/useSettings";
+import { useEnvironmentSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
+import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -1028,17 +1029,13 @@ function ChatViewContent(props: ChatViewProps) {
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
-  const settings = useSettings();
+  const settings = useEnvironmentSettings(environmentId);
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
   const autoOpenPlanSidebar = settings.autoOpenPlanSidebar;
   const navigate = useNavigate();
-  const rawSearch = useSearch({
-    strict: false,
-    select: (params) => parseDiffRouteSearch(params),
-  });
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -1131,6 +1128,10 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
+  const [
+    pendingServerThreadStartFromOriginByThreadId,
+    setPendingServerThreadStartFromOriginByThreadId,
+  ] = useState<Record<string, boolean>>({});
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -1230,7 +1231,6 @@ function ChatViewContent(props: ChatViewProps) {
     composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const terminalOwnerThreadId = workspaceThreadRef?.threadId ?? null;
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -1268,8 +1268,9 @@ function ChatViewContent(props: ChatViewProps) {
     return labels;
   }, [activeThreadKnownSessions]);
   const activeRightPanelKind = useRightPanelStore((state) =>
-    selectActiveRightPanelKindWithUrl(state.byThreadKey, workspaceThreadRef, diffOpen),
+    selectActiveRightPanel(state.byThreadKey, workspaceThreadRef),
   );
+  const diffOpen = activeRightPanelKind === "diff";
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, workspaceThreadRef),
   );
@@ -1303,12 +1304,6 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activePreviewState.sessions, workspaceThreadRef]);
 
   const planSidebarOpen = activeRightPanelKind === "plan";
-
-  useEffect(() => {
-    if (!workspaceThreadRef || !diffOpen) return;
-    useRightPanelStore.getState().open(workspaceThreadRef, "diff");
-  }, [diffOpen, workspaceThreadRef]);
-
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -1435,7 +1430,7 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [retryEnvironment],
   );
-  const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
+  const projectGroupingSettings = selectProjectGroupingSettings(settings);
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
@@ -1604,7 +1599,11 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProvider: selectedProviderByThreadId,
     threadProvider,
   });
-  const serverConfig = activeEnvironment?.serverConfig ?? primaryEnvironment?.serverConfig ?? null;
+  // Once a thread selects an environment, never substitute the primary
+  // environment's config while the selected environment is still loading.
+  const serverConfig = activeThread
+    ? (activeEnvironment?.serverConfig ?? null)
+    : (primaryEnvironment?.serverConfig ?? null);
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
   const versionMismatchDismissKey =
     versionMismatch && activeThread
@@ -2160,27 +2159,7 @@ function ChatViewContent(props: ChatViewProps) {
     if (workspaceThreadRef) {
       useRightPanelStore.getState().toggle(workspaceThreadRef, "diff");
     }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
-      },
-    });
-  }, [
-    diffOpen,
-    environmentId,
-    isServerThread,
-    navigate,
-    onDiffPanelOpen,
-    threadId,
-    workspaceThreadRef,
-  ]);
+  }, [diffOpen, isServerThread, onDiffPanelOpen, workspaceThreadRef]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -2763,21 +2742,7 @@ function ChatViewContent(props: ChatViewProps) {
     if (!workspaceThreadRef || !isServerThread || !isGitRepo) return;
     useRightPanelStore.getState().open(workspaceThreadRef, "diff");
     onDiffPanelOpen?.();
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: { environmentId, threadId },
-      replace: true,
-      search: (previous) => ({ ...stripDiffSearchParams(previous), diff: "1" }),
-    });
-  }, [
-    environmentId,
-    isGitRepo,
-    isServerThread,
-    navigate,
-    onDiffPanelOpen,
-    threadId,
-    workspaceThreadRef,
-  ]);
+  }, [isGitRepo, isServerThread, onDiffPanelOpen, workspaceThreadRef]);
   const addFilesSurface = useCallback(() => {
     if (!workspaceThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(workspaceThreadRef, "files");
@@ -2795,30 +2760,13 @@ function ChatViewContent(props: ChatViewProps) {
       useRightPanelStore.getState().close(workspaceThreadRef);
       return;
     }
-    if (diffOpen) {
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: { environmentId, threadId },
-        replace: true,
-        search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
-      });
-    }
     const activeTabId = activePreviewState.activeTabId;
     if (activeTabId) {
       useRightPanelStore.getState().openBrowser(workspaceThreadRef, activeTabId);
     } else {
       createBrowserSurface();
     }
-  }, [
-    activePreviewState.activeTabId,
-    createBrowserSurface,
-    diffOpen,
-    environmentId,
-    navigate,
-    previewPanelOpen,
-    threadId,
-    workspaceThreadRef,
-  ]);
+  }, [activePreviewState.activeTabId, createBrowserSurface, previewPanelOpen, workspaceThreadRef]);
   const closePreviewPanel = useCallback(() => {
     if (workspaceThreadRef) {
       setMaximizedRightPanelThreadKey(null);
@@ -2942,31 +2890,9 @@ function ChatViewContent(props: ChatViewProps) {
       }
       if (surface.kind === "diff" && !diffOpen) {
         onDiffPanelOpen?.();
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId },
-          replace: true,
-          search: (previous) => ({ ...stripDiffSearchParams(previous), diff: "1" }),
-        });
-      } else if (surface.kind !== "diff" && diffOpen) {
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId },
-          replace: true,
-          search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
-        });
       }
     },
-    [
-      diffOpen,
-      dismissPlanSidebarForCurrentTurn,
-      environmentId,
-      navigate,
-      onDiffPanelOpen,
-      planSidebarOpen,
-      threadId,
-      workspaceThreadRef,
-    ],
+    [diffOpen, dismissPlanSidebarForCurrentTurn, onDiffPanelOpen, planSidebarOpen, workspaceThreadRef],
   );
   const toggleRightPanel = useCallback(() => {
     if (!workspaceThreadRef) return;
@@ -3012,25 +2938,13 @@ function ChatViewContent(props: ChatViewProps) {
           }
         }
       }
-      if (diffOpen && surfaces.some((surface) => surface.kind === "diff")) {
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId },
-          replace: true,
-          search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
-        });
-      }
     },
     [
       activePreviewState.sessions,
       closePreview,
       closeTerminalMutation,
-      diffOpen,
       dismissPlanSidebarForCurrentTurn,
-      environmentId,
-      navigate,
       storeCloseTerminal,
-      threadId,
       workspaceThreadRef,
     ],
   );
@@ -3341,6 +3255,12 @@ function ChatViewContent(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const startFromOrigin = isLocalDraftThread
+    ? (draftThread?.startFromOrigin ?? false)
+    : canOverrideServerThreadEnvMode
+      ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
+        settings.newWorktreesStartFromOrigin)
+      : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -3903,6 +3823,7 @@ function ChatViewContent(props: ChatViewProps) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
+                      ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },
                     runSetupScript: true,
                   }
@@ -4588,6 +4509,10 @@ function ChatViewContent(props: ChatViewProps) {
       if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, {
           envMode: mode,
+          startFromOrigin: resolveNewDraftStartFromOrigin({
+            envMode: mode,
+            newWorktreesStartFromOrigin: settings.newWorktreesStartFromOrigin,
+          }),
           ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
         });
       }
@@ -4598,36 +4523,41 @@ function ChatViewContent(props: ChatViewProps) {
       composerDraftTarget,
       draftThread?.worktreePath,
       isLocalDraftThread,
+      settings.newWorktreesStartFromOrigin,
       setPendingServerThreadEnvMode,
       scheduleComposerFocus,
       setDraftThreadContext,
     ],
   );
 
+  const onStartFromOriginChange = (nextStartFromOrigin: boolean) => {
+    if (canOverrideServerThreadEnvMode && activeThread) {
+      setPendingServerThreadStartFromOriginByThreadId((current) =>
+        current[activeThread.id] === nextStartFromOrigin
+          ? current
+          : { ...current, [activeThread.id]: nextStartFromOrigin },
+      );
+      return;
+    }
+    if (isLocalDraftThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        startFromOrigin: nextStartFromOrigin,
+      });
+    }
+  };
+
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
   const onOpenTurnDiff = useCallback(
     (turnId: TurnId, filePath?: string) => {
-      if (!isServerThread) {
-        return;
-      }
+      const diffThreadRef = workspaceThreadRef ?? activeThreadRef;
+      if (!isServerThread || !diffThreadRef) return;
+      useDiffPanelStore.getState().selectTurn(diffThreadRef, turnId, filePath);
+      useRightPanelStore.getState().open(diffThreadRef, "diff");
       onDiffPanelOpen?.();
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: {
-          environmentId,
-          threadId,
-        },
-        search: (previous) => {
-          const rest = stripDiffSearchParams(previous);
-          return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
-        },
-      });
     },
-    [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
+    [activeThreadRef, isServerThread, onDiffPanelOpen, workspaceThreadRef],
   );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
@@ -4940,6 +4870,8 @@ function ChatViewContent(props: ChatViewProps) {
                   threadId={activeThread.id}
                   {...(routeKind === "draft" && draftId ? { draftId } : {})}
                   onEnvModeChange={onEnvModeChange}
+                  startFromOrigin={startFromOrigin}
+                  onStartFromOriginChange={onStartFromOriginChange}
                   {...(canOverrideServerThreadEnvMode ? { effectiveEnvModeOverride: envMode } : {})}
                   {...(canOverrideServerThreadEnvMode
                     ? {

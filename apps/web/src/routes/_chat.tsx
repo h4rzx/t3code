@@ -18,7 +18,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
-import { useSettings } from "~/hooks/useSettings";
+import { usePrimarySettings } from "~/hooks/useSettings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
 function ChatRouteGlobalShortcuts() {
@@ -40,8 +40,7 @@ function ChatRouteGlobalShortcuts() {
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
       : false,
   );
-  const appSettings = useSettings();
-
+  const primarySettings = usePrimarySettings();
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -72,7 +71,7 @@ function ChatRouteGlobalShortcuts() {
           activeThread: activeThread ?? undefined,
           defaultProjectRef,
           defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
-            defaultEnvMode: appSettings.defaultThreadEnvMode,
+            defaultEnvMode: primarySettings.defaultThreadEnvMode,
           }),
           handleNewThread,
         });
@@ -87,7 +86,7 @@ function ChatRouteGlobalShortcuts() {
           activeThread: activeThread ?? undefined,
           defaultProjectRef,
           defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
-            defaultEnvMode: appSettings.defaultThreadEnvMode,
+            defaultEnvMode: primarySettings.defaultThreadEnvMode,
           }),
           handleNewThread,
         });
@@ -150,10 +149,10 @@ function ChatRouteGlobalShortcuts() {
     keybindings,
     defaultProjectRef,
     previewOpen,
+    primarySettings.defaultThreadEnvMode,
     routeThreadRef,
     selectedThreadKeysSize,
     terminalOpen,
-    appSettings.defaultThreadEnvMode,
   ]);
 
   return null;

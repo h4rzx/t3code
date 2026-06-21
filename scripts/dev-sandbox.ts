@@ -3,7 +3,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeOS from "node:os";
-import { fileURLToPath } from "node:url";
+import * as NodeURL from "node:url";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -11,7 +11,7 @@ import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import { ChildProcess } from "effect/unstable/process";
 
-const devRunnerPath = fileURLToPath(new URL("./dev-runner.ts", import.meta.url));
+const devRunnerPath = NodeURL.fileURLToPath(new URL("./dev-runner.ts", import.meta.url));
 
 class DevSandboxError extends Data.TaggedError("DevSandboxError")<{
   readonly message: string;
