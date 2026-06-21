@@ -6,7 +6,7 @@ This tracks planned improvements to make T3 Code a stronger harness around codin
 
 ## Current Upstream Baseline
 
-The fork is synced through upstream `pingdotgg/t3code` `803c2b77` plus local harness planning and dev-sandbox changes.
+The fork is synced through upstream `pingdotgg/t3code` `82a9bcc7` plus local harness planning, dev-sandbox, workspace-sidebar, and fork-sync changes.
 
 Relevant upstream changes to build on:
 
@@ -15,6 +15,7 @@ Relevant upstream changes to build on:
 - Settings are split between server/environment settings and client-local settings. Workspace defaults such as local vs worktree mode should come from the target environment.
 - Source-control, workspace filesystem/search, preview automation, and provider/runtime error handling received broad structured-error improvements. Harness work should reuse those primitives instead of adding parallel error wrappers.
 - The repo now enforces stricter script/import conventions, including namespace imports for Node built-ins.
+- The latest upstream batch continues standardizing Effect/Schema error boundaries across auth, VCS, CLI, release, desktop update, checkpoint diff, provider, and preview flows. Harness features should follow those typed-error conventions from the start.
 
 ## Priority Summary
 
@@ -32,7 +33,7 @@ Relevant upstream changes to build on:
 | P1       | Context and task update reactor                   | Not started     | Keeps `.context` and task state useful after meaningful turns without asking users to manually summarize state.                   |
 | P1       | Action-specific prompts                           | Not started     | Makes UI actions such as review, PR creation, fix checks, and handoff more consistent.                                            |
 | P1       | Source-control action target resolution           | Not started     | Ensures commit, push, and PR actions target the checked-out repository/branch instead of the wrong fork or upstream remote.       |
-| P1       | Fork sync command and drift monitor               | In progress     | Keeps a fork close to upstream with a repeatable checked command and scheduled drift alerts.                                      |
+| P1       | Fork sync command and drift monitor               | Complete        | Keeps a fork close to upstream with a repeatable checked command and scheduled drift alerts.                                      |
 | P1       | Workspace lifecycle dashboard                     | Not started     | Makes the workspace/worktree/branch/terminal/diff/PR lifecycle visible as one unit of work.                                       |
 | P1       | Integrated file editor and review surface         | Not started     | Gives users a Conductor-style file editor for inspecting, editing, and reviewing agent changes next to chat, diffs, and comments. |
 | P1       | File diff review improvements                     | Not started     | Makes large diffs easier to navigate, filter, comment on, and hand back to agents.                                                |
