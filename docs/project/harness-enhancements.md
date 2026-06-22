@@ -74,7 +74,7 @@ Expected behavior:
 - Workspaces appear under projects.
 - Chats appear under workspaces only when the workspace is expanded.
 - Clicking a chat opens that one chat in the center, matching current T3 behavior.
-- The workspace row has separate controls: caret toggles expand/collapse, title opens the last active chat, and `+` creates a new chat in that workspace.
+- The workspace row has separate controls: caret/title toggle expand/collapse, chat rows open individual chats, and `+` creates a new chat in that workspace.
 - Collapsed workspaces show only workspace-level status such as name, branch/status, and changed-file count.
 - Expanded workspaces show their chats, with the active chat highlighted.
 - The center layout does not change in the first implementation; no Conductor-style center chat tabs.
