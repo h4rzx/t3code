@@ -3233,6 +3233,26 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("allows credentialed auth requests from the desktop dev renderer origin", () =>
+    Effect.gen(function* () {
+      const desktopDevOrigin = "t3code-dev://app";
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL("http://127.0.0.1:5173") },
+      });
+
+      const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
+      const response = yield* fetchEffect(sessionUrl, {
+        headers: { origin: desktopDevOrigin },
+      });
+
+      assert.equal(response.status, 200);
+      assertBrowserApiCorsResponseHeaders(response.headers, {
+        origin: desktopDevOrigin,
+        credentials: true,
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("includes CORS headers on remote websocket-ticket auth failures", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

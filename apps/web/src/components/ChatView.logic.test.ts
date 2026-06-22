@@ -12,6 +12,7 @@ import {
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
+  resolveBranchForNewThreadMetadata,
   resolveWorkspaceScopedThreadRef,
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
@@ -140,6 +141,38 @@ describe("deriveComposerSendState", () => {
         elementContextCount: 0,
       }).hasSendableContent,
     ).toBe(false);
+  });
+});
+
+describe("resolveBranchForNewThreadMetadata", () => {
+  it("uses the current git branch for existing worktree chats", () => {
+    expect(
+      resolveBranchForNewThreadMetadata({
+        activeThreadBranch: "feat/enhancements",
+        activeWorktreePath: "/repo/.t3/worktrees/enhancements",
+        currentGitBranch: "t3code/handle-greeting",
+      }),
+    ).toBe("t3code/handle-greeting");
+  });
+
+  it("falls back to stored thread branch when git status has no branch", () => {
+    expect(
+      resolveBranchForNewThreadMetadata({
+        activeThreadBranch: "feat/enhancements",
+        activeWorktreePath: "/repo/.t3/worktrees/enhancements",
+        currentGitBranch: null,
+      }),
+    ).toBe("feat/enhancements");
+  });
+
+  it("keeps selected base branch for new worktree creation", () => {
+    expect(
+      resolveBranchForNewThreadMetadata({
+        activeThreadBranch: "main",
+        activeWorktreePath: null,
+        currentGitBranch: "feature/current",
+      }),
+    ).toBe("main");
   });
 });
 

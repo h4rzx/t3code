@@ -76,6 +76,10 @@ describe("orchestration projector", () => {
       {
         id: "thread-1",
         projectId: "project-1",
+        workspaceId: "project-1:workspace:local",
+        workspaceBranch: null,
+        workspaceWorktreePath: null,
+        workspaceLocalCheckout: true,
         title: "demo",
         modelSelection: {
           instanceId: "codex",

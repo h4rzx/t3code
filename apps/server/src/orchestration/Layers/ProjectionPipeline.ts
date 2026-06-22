@@ -3,6 +3,7 @@ import {
   type ChatAttachment,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
+  type ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -29,6 +30,7 @@ import {
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
+import { ProjectionWorkspaceRepository } from "../../persistence/Services/ProjectionWorkspaces.ts";
 import {
   type ProjectionTurn,
   ProjectionTurnRepository,
@@ -41,6 +43,7 @@ import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
+import { ProjectionWorkspaceRepositoryLive } from "../../persistence/Layers/ProjectionWorkspaces.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
@@ -48,7 +51,10 @@ import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
-import { resolveThreadWorkspaceIdentityPatch } from "../threadWorkspaceIdentity.ts";
+import {
+  deriveThreadWorkspaceRecord,
+  resolveThreadWorkspaceRecordForPatch,
+} from "../threadWorkspaceIdentity.ts";
 import {
   attachmentRelativePath,
   parseAttachmentIdFromRelativePath,
@@ -479,6 +485,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
+    const projectionWorkspaceRepository = yield* ProjectionWorkspaceRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
 
@@ -590,14 +597,43 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       });
     });
 
+    const upsertWorkspaceForThread = Effect.fn("ProjectionPipeline.upsertWorkspaceForThread")(
+      function* (input: {
+        readonly projectId: ProjectId;
+        readonly workspaceId?: string | null | undefined;
+        readonly branch: string | null;
+        readonly worktreePath: string | null;
+        readonly createdAt: string;
+        readonly updatedAt: string;
+      }) {
+        const workspace = deriveThreadWorkspaceRecord(input);
+        yield* projectionWorkspaceRepository.upsert({
+          ...workspace,
+          createdAt: input.createdAt,
+          updatedAt: input.updatedAt,
+          archivedAt: null,
+          deletedAt: null,
+        });
+        return workspace;
+      },
+    );
+
     const applyThreadsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadsProjection",
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
         case "thread.created":
+          const workspace = yield* upsertWorkspaceForThread({
+            projectId: event.payload.projectId,
+            branch: event.payload.branch,
+            worktreePath: event.payload.worktreePath,
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.updatedAt,
+          });
           yield* projectionThreadRepository.upsert({
             threadId: event.payload.threadId,
             projectId: event.payload.projectId,
+            workspaceId: workspace.workspaceId,
             title: event.payload.title,
             modelSelection: event.payload.modelSelection,
             runtimeMode: event.payload.runtimeMode,
@@ -659,9 +695,39 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.modelSelection !== undefined
               ? { modelSelection: event.payload.modelSelection }
               : {}),
-            ...resolveThreadWorkspaceIdentityPatch(existingRow.value, event.payload),
+            ...(() => {
+              const threadWorkspaceUpdate = resolveThreadWorkspaceRecordForPatch({
+                projectId: existingRow.value.projectId,
+                thread: existingRow.value,
+                patch: event.payload,
+              });
+              return {
+                ...threadWorkspaceUpdate.patch,
+                ...(threadWorkspaceUpdate.workspace
+                  ? { workspaceId: threadWorkspaceUpdate.workspace.workspaceId }
+                  : {}),
+              };
+            })(),
             updatedAt: event.payload.updatedAt,
           });
+          {
+            const updatedRow = yield* projectionThreadRepository.getById({
+              threadId: event.payload.threadId,
+            });
+            if (Option.isSome(updatedRow)) {
+              const workspace = yield* upsertWorkspaceForThread({
+                projectId: updatedRow.value.projectId,
+                branch: updatedRow.value.branch,
+                worktreePath: updatedRow.value.worktreePath,
+                createdAt: updatedRow.value.createdAt,
+                updatedAt: event.payload.updatedAt,
+              });
+              yield* projectionThreadRepository.upsert({
+                ...updatedRow.value,
+                workspaceId: workspace.workspaceId,
+              });
+            }
+          }
           return;
         }
 
@@ -1594,6 +1660,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
+  Layer.provideMerge(ProjectionWorkspaceRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),

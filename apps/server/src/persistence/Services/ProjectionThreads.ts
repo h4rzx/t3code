@@ -15,6 +15,7 @@ import {
   RuntimeMode,
   ThreadId,
   TurnId,
+  WorkspaceId,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -26,6 +27,10 @@ import type { ProjectionRepositoryError } from "../Errors.ts";
 export const ProjectionThread = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
+  workspaceId: Schema.NullOr(WorkspaceId),
+  workspaceBranch: Schema.optional(Schema.NullOr(Schema.String)),
+  workspaceWorktreePath: Schema.optional(Schema.NullOr(Schema.String)),
+  workspaceLocalCheckout: Schema.optional(Schema.NullOr(NonNegativeInt)),
   title: Schema.String,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,

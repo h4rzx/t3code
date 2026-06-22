@@ -11,6 +11,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
+import { ensureConsoleStreamGuard, isIgnorableConsoleStreamError } from "./DesktopConsole.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
 export const DESKTOP_LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
@@ -267,12 +268,18 @@ const writeDevelopmentConsoleOutput = (
   streamName: "stdout" | "stderr",
   chunk: Uint8Array,
 ): Effect.Effect<void> =>
-  Effect.try({
-    try: () => {
+  Effect.suspend(() => {
+    try {
       const output = streamName === "stderr" ? process.stderr : process.stdout;
+      ensureConsoleStreamGuard(output);
+      if (!output.writable || output.destroyed || output.writableEnded) return Effect.void;
       output.write(chunk);
-    },
-    catch: (cause) => new DesktopBackendConsoleWriteError({ streamName, cause }),
+      return Effect.void;
+    } catch (cause) {
+      return isIgnorableConsoleStreamError(cause)
+        ? Effect.void
+        : Effect.fail(new DesktopBackendConsoleWriteError({ streamName, cause }));
+    }
   }).pipe(
     Effect.catchTags({
       DesktopBackendConsoleWriteError: (error) => Effect.logError(error.message, { error }),

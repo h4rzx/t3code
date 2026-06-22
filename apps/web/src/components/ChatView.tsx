@@ -218,6 +218,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveBranchForNewThreadMetadata,
   resolveWorkspaceScopedThreadRef,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
@@ -3261,6 +3262,12 @@ function ChatViewContent(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const currentGitBranch = gitStatusQuery.data?.refName ?? null;
+  const branchForNewThreadMetadata = resolveBranchForNewThreadMetadata({
+    activeThreadBranch,
+    activeWorktreePath,
+    currentGitBranch,
+  });
   const startFromOrigin = isLocalDraftThread
     ? (draftThread?.startFromOrigin ?? false)
     : canOverrideServerThreadEnvMode
@@ -3647,14 +3654,14 @@ function ChatViewContent(props: ChatViewProps) {
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
-        ? activeThreadBranch
+        ? branchForNewThreadMetadata
         : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
-    if (shouldCreateWorktree && !activeThreadBranch) {
+    if (shouldCreateWorktree && !branchForNewThreadMetadata) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
@@ -3817,7 +3824,7 @@ function ChatViewContent(props: ChatViewProps) {
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
                       interactionMode,
-                      branch: activeThreadBranch,
+                      branch: branchForNewThreadMetadata,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
                     },
@@ -4308,7 +4315,7 @@ function ChatViewContent(props: ChatViewProps) {
         modelSelection: nextThreadModelSelection,
         runtimeMode,
         interactionMode: "default",
-        branch: activeThreadBranch,
+        branch: branchForNewThreadMetadata,
         worktreePath: activeThread.worktreePath,
         createdAt,
       },
@@ -4394,8 +4401,8 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeProject,
     activeProposedPlan,
-    activeThreadBranch,
     activeThread,
+    branchForNewThreadMetadata,
     beginLocalDispatch,
     activeEnvironmentUnavailable,
     createThread,

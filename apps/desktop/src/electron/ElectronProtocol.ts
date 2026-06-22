@@ -11,6 +11,31 @@ export const DESKTOP_HOST = "app";
 export const DESKTOP_PRODUCTION_SCHEME = "t3code";
 export const DESKTOP_DEVELOPMENT_SCHEME = "t3code-dev";
 
+Electron.protocol.registerSchemesAsPrivileged([
+  {
+    scheme: DESKTOP_PRODUCTION_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+      codeCache: true,
+    },
+  },
+  {
+    scheme: DESKTOP_DEVELOPMENT_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+      codeCache: true,
+    },
+  },
+]);
+
 export function getDesktopScheme(isDevelopment: boolean): string {
   return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;
 }
@@ -103,6 +128,25 @@ function withContentSecurityPolicy(response: Response, policy: string): Response
   });
 }
 
+const PROXIED_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-language",
+  "content-type",
+  "if-modified-since",
+  "if-none-match",
+  "range",
+]);
+
+function makeProxyRequestHeaders(headers: Headers): Headers {
+  const output = new Headers();
+  for (const [name, value] of headers) {
+    if (PROXIED_REQUEST_HEADERS.has(name.toLowerCase())) {
+      output.set(name, value);
+    }
+  }
+  return output;
+}
+
 async function proxyRequest(
   request: Request,
   targetOrigin: URL,
@@ -116,14 +160,18 @@ async function proxyRequest(
   const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, targetOrigin);
   const init: RequestInit = {
     method: request.method,
-    headers: request.headers,
+    headers: makeProxyRequestHeaders(request.headers),
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = request.body;
     (init as RequestInit & { duplex: "half" }).duplex = "half";
   }
-  const response = await Electron.net.fetch(targetUrl.toString(), init);
-  return withContentSecurityPolicy(response, contentSecurityPolicy);
+  try {
+    const response = await Electron.net.fetch(targetUrl.toString(), init);
+    return withContentSecurityPolicy(response, contentSecurityPolicy);
+  } catch {
+    return new Response("Desktop protocol proxy request failed.", { status: 502 });
+  }
 }
 
 export const make = Effect.gen(function* () {

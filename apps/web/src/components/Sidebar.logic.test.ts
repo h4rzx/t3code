@@ -30,6 +30,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  WorkspaceId,
 } from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -913,6 +914,44 @@ describe("buildDefaultWorkspacesForThreads", () => {
 
     expect(afterRename[0]?.id).toBe(beforeRename[0]?.id);
     expect(afterRename[0]?.title).toBe("feature/new-name");
+  });
+
+  it("uses persisted workspace identity and metadata when available", () => {
+    const beforeRename = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-worktree"),
+          title: "Run checks",
+          branch: "feature/old-name",
+          worktreePath: "/repo/.t3/worktrees/checks",
+          workspaceId: WorkspaceId.make("workspace-checks"),
+          workspaceBranch: "feature/old-name",
+          workspaceWorktreePath: "/repo/.t3/worktrees/checks",
+        }),
+      ],
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+    const afterRename = buildDefaultWorkspacesForThreads({
+      projectKey: "project:local:project-1",
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-worktree"),
+          title: "Run checks",
+          branch: "feature/new-name",
+          worktreePath: "/repo/.t3/worktrees/checks",
+          workspaceId: WorkspaceId.make("workspace-checks"),
+          workspaceBranch: "feature/new-name",
+          workspaceWorktreePath: "/repo/.t3/worktrees/checks",
+        }),
+      ],
+      getThreadKey: (thread) => `thread:${thread.id}`,
+    });
+
+    expect(beforeRename[0]?.id).toBe("project:local:project-1:workspace:workspace-checks");
+    expect(afterRename[0]?.id).toBe(beforeRename[0]?.id);
+    expect(afterRename[0]?.title).toBe("feature/new-name");
+    expect(afterRename[0]?.branch).toBe("feature/new-name");
   });
 
   it("uses a stable local workspace label for legacy threads without branch or worktree context", () => {

@@ -3,15 +3,22 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { handleMock, netFetchMock, unhandleMock } = vi.hoisted(() => ({
-  handleMock: vi.fn(),
-  netFetchMock: vi.fn(),
-  unhandleMock: vi.fn(),
-}));
+const { handleMock, netFetchMock, registerSchemesAsPrivilegedMock, unhandleMock } = vi.hoisted(
+  () => ({
+    handleMock: vi.fn(),
+    netFetchMock: vi.fn(),
+    registerSchemesAsPrivilegedMock: vi.fn(),
+    unhandleMock: vi.fn(),
+  }),
+);
 
 vi.mock("electron", () => ({
   net: { fetch: netFetchMock },
-  protocol: { handle: handleMock, unhandle: unhandleMock },
+  protocol: {
+    handle: handleMock,
+    registerSchemesAsPrivileged: registerSchemesAsPrivilegedMock,
+    unhandle: unhandleMock,
+  },
 }));
 
 import * as ElectronProtocol from "./ElectronProtocol.ts";
@@ -21,6 +28,37 @@ describe("ElectronProtocol", () => {
     handleMock.mockReset();
     netFetchMock.mockReset();
     unhandleMock.mockReset();
+  });
+
+  it("registers desktop URL schemes with browser-compatible privileges before app ready", () => {
+    assert.deepEqual(registerSchemesAsPrivilegedMock.mock.calls, [
+      [
+        [
+          {
+            scheme: "t3code",
+            privileges: {
+              standard: true,
+              secure: true,
+              supportFetchAPI: true,
+              corsEnabled: true,
+              stream: true,
+              codeCache: true,
+            },
+          },
+          {
+            scheme: "t3code-dev",
+            privileges: {
+              standard: true,
+              secure: true,
+              supportFetchAPI: true,
+              corsEnabled: true,
+              stream: true,
+              codeCache: true,
+            },
+          },
+        ],
+      ],
+    ]);
   });
 
   it.effect("proxies the stable renderer origin to the current app server", () =>
@@ -43,7 +81,16 @@ describe("ElectronProtocol", () => {
           assert.isDefined(handler);
 
           const response = yield* Effect.promise(() =>
-            handler!(new Request("t3code-dev://app/api/health?verbose=1")),
+            handler!(
+              new Request("t3code-dev://app/api/health?verbose=1", {
+                headers: {
+                  Accept: "application/json",
+                  Origin: "t3code-dev://app",
+                  Referer: "t3code-dev://app/",
+                  "Sec-Fetch-Site": "same-origin",
+                },
+              }),
+            ),
           );
           assert.equal(yield* Effect.promise(() => response.text()), "ok");
           assert.include(
@@ -70,6 +117,9 @@ describe("ElectronProtocol", () => {
         ["t3code-dev"],
       );
       assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
+      assert.deepEqual(Array.from(netFetchMock.mock.calls[0]?.[1]?.headers ?? []), [
+        ["accept", "application/json"],
+      ]);
       assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );

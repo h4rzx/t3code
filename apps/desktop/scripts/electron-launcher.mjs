@@ -20,7 +20,7 @@ export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
-const LAUNCHER_VERSION = 12;
+const LAUNCHER_VERSION = 13;
 const defaultIconPath = NodePath.join(desktopDir, "resources", "icon.icns");
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
@@ -100,9 +100,8 @@ function shellSingleQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
-  const mainEntryPath = NodePath.join(desktopDir, "dist-electron", "main.cjs");
-  const envEntries = [
+function resolveDevelopmentLauncherEnvEntries() {
+  return [
     ["VITE_DEV_SERVER_URL", process.env.VITE_DEV_SERVER_URL],
     ["T3CODE_PORT", process.env.T3CODE_PORT],
     ["T3CODE_HOME", process.env.T3CODE_HOME],
@@ -111,6 +110,11 @@ function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
     ["T3CODE_OTLP_EXPORT_INTERVAL_MS", process.env.T3CODE_OTLP_EXPORT_INTERVAL_MS],
     ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
+}
+
+function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
+  const mainEntryPath = NodePath.join(desktopDir, "dist-electron", "main.cjs");
+  const envEntries = resolveDevelopmentLauncherEnvEntries();
   NodeFS.writeFileSync(
     targetBinaryPath,
     [
@@ -278,6 +282,9 @@ function buildMacLauncher(electronBinaryPath) {
     iconMtimeMs: NodeFS.statSync(iconPath).mtimeMs,
     appBundleId: APP_BUNDLE_ID,
     appProtocolSchemes: APP_PROTOCOL_SCHEMES,
+    ...(isDevelopment
+      ? { launcherEnvEntries: Object.fromEntries(resolveDevelopmentLauncherEnvEntries()) }
+      : {}),
   };
 
   const currentMetadata = readJson(metadataPath);
