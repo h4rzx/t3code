@@ -19,6 +19,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
+  WorkspaceId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -344,6 +345,10 @@ export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  workspaceId: Schema.optional(Schema.NullOr(WorkspaceId)),
+  workspaceBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workspaceWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workspaceLocalCheckout: Schema.optional(Schema.Boolean),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -367,9 +372,23 @@ export const OrchestrationThread = Schema.Struct({
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
+export const OrchestrationWorkspace = Schema.Struct({
+  id: WorkspaceId,
+  projectId: ProjectId,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  localCheckout: Schema.Boolean,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationWorkspace = typeof OrchestrationWorkspace.Type;
+
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
+  workspaces: Schema.optional(Schema.Array(OrchestrationWorkspace)),
   threads: Schema.Array(OrchestrationThread),
   updatedAt: IsoDateTime,
 });
@@ -390,6 +409,10 @@ export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  workspaceId: Schema.optional(Schema.NullOr(WorkspaceId)),
+  workspaceBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workspaceWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workspaceLocalCheckout: Schema.optional(Schema.Boolean),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -413,6 +436,7 @@ export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
+  workspaces: Schema.optional(Schema.Array(OrchestrationWorkspace)),
   threads: Schema.Array(OrchestrationThreadShell),
   updatedAt: IsoDateTime,
 });

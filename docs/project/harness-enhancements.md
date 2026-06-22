@@ -1,6 +1,6 @@
 # Harness Enhancements Tracker
 
-> Last updated: 2026-06-21
+> Last updated: 2026-06-22
 
 This tracks planned improvements to make T3 Code a stronger harness around coding agents, inspired by the useful parts of Conductor's workspace model: persistent context, injected guidance, action-specific prompts, isolated workspaces, review flow, and merge readiness.
 
@@ -23,7 +23,7 @@ Relevant upstream changes to build on:
 | -------- | ------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | P0       | Workspace identity and sidebar hierarchy          | Compat complete | Creates the Project -> Workspace -> Chat model that every other harness feature can attach to.                                    |
 | P0       | Workspace migration and compatibility layer       | Compat complete | Lets existing projects, threads, routes, and APIs keep working while workspace ownership rolls out.                               |
-| P0       | Durable workspace persistence model               | Not started     | Gives workspaces stable IDs and stored ownership so branch/worktree state no longer depends on thread metadata.                   |
+| P0       | Durable workspace persistence model               | Complete        | Gives workspaces stable IDs and stored ownership so branch/worktree state no longer depends on thread metadata.                   |
 | P0       | Dev/prod data isolation and feature flag rollout  | Complete        | Lets the new workspace layout run in dev without risking the user's deployed/current T3 Code data.                                |
 | P0       | Workspace context folder                          | Not started     | Gives each workspace durable memory across turns, restarts, and provider handoffs.                                                |
 | P0       | Durable task list                                 | Not started     | Gives every workspace a trustworthy task state instead of relying on the agent to update a checklist.                             |
@@ -95,10 +95,10 @@ Completed compatibility scope:
 - Workspace rows expand/collapse independently from the selected center chat.
 - Terminal drawer state and right-panel visibility follow the active workspace-scoped thread reference, while chat-specific diff and plan data remains attached to the selected chat.
 - Settings and keybinding documentation describe the branch/worktree behavior for new chat creation.
+- Projection-backed workspace IDs and metadata are now consumed by the sidebar when present, with legacy thread metadata retained as a fallback.
 
 Still pending:
 
-- Add a durable workspace model instead of synthesizing workspace groups from thread metadata.
 - Move branch/worktree ownership fully from thread fields to workspace fields after compatibility is proven.
 - Add workspace-level lifecycle surfaces for changed files, checks, review state, and PR state.
 
@@ -154,14 +154,14 @@ Rollback and safety:
 
 Completed compatibility scope:
 
-- There is not yet a durable workspace table. The UI synthesizes compatible workspace groups from existing thread project, branch, worktree, and local-checkout metadata.
+- Legacy snapshots still synthesize compatible workspace groups from thread project, branch, worktree, and local-checkout metadata when durable workspace fields are absent.
 - Projection and client reducer paths preserve an existing worktree identity when stale restored local metadata arrives without a worktree path.
 - Project-scoped new chat creation clears active branch/worktree context when the selected project differs from the current chat, so the draft appears under the selected project instead of the previously active workspace.
+- Durable projection workspace records now backfill and repair thread workspace linkage while old thread routes and thread-owned branch/worktree fields remain readable.
 
 Still pending:
 
-- Add persistent workspace IDs and workspace-aware routes/API commands.
-- Backfill durable workspace records once the schema exists.
+- Add workspace-aware routes/API commands.
 - Keep old thread routes as aliases during the durable migration.
 
 ## P0: Durable Workspace Persistence Model
@@ -198,6 +198,16 @@ Initial implementation notes:
 - Add tests for old snapshots, new snapshots, mixed snapshots, branch rename, archive/restore, and
   project-scoped new chat creation.
 - Only after this model is stable should branch/worktree ownership move fully off thread records.
+
+Completed scope:
+
+- Added `WorkspaceId`, persisted projection workspace records, and thread workspace linkage.
+- Backfilled existing projection threads into workspaces using worktree path first, then branch, then local checkout.
+- Updated snapshot queries and sidebar grouping to prefer persisted workspace metadata while preserving legacy fallback behavior.
+- Preserved same-worktree workspace identity across branch label changes.
+- Fixed branch/local-to-worktree transitions so only the moved chat changes workspace instead of relabeling sibling branch chats.
+- Added a corrective projection migration that rebuilds workspace rows from each thread's actual branch/worktree fields.
+- Covered workspace persistence, sidebar grouping, branch rename, and branch-to-worktree movement with focused tests.
 
 ## P0: Dev/Prod Data Isolation and Feature Flag Rollout
 

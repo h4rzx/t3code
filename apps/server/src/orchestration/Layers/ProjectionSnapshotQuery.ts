@@ -253,6 +253,30 @@ function mapProposedPlanRow(
   };
 }
 
+function mapThreadWorkspaceFields(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>): {
+  readonly workspaceId?: NonNullable<
+    Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>["workspaceId"]
+  >;
+  readonly workspaceBranch?: string | null;
+  readonly workspaceWorktreePath?: string | null;
+  readonly workspaceLocalCheckout?: boolean;
+} {
+  if (row.workspaceId === null) {
+    return {};
+  }
+
+  return {
+    workspaceId: row.workspaceId,
+    ...(row.workspaceBranch !== undefined ? { workspaceBranch: row.workspaceBranch } : {}),
+    ...(row.workspaceWorktreePath !== undefined
+      ? { workspaceWorktreePath: row.workspaceWorktreePath }
+      : {}),
+    ...(row.workspaceLocalCheckout != null
+      ? { workspaceLocalCheckout: row.workspaceLocalCheckout > 0 }
+      : {}),
+  };
+}
+
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): ProjectionRepositoryError =>
     Schema.isSchemaError(cause)
@@ -321,25 +345,31 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
-        FROM projection_threads
-        ORDER BY created_at ASC, thread_id ASC
+          threads.thread_id AS "threadId",
+          threads.project_id AS "projectId",
+          threads.workspace_id AS "workspaceId",
+          workspaces.branch AS "workspaceBranch",
+          workspaces.worktree_path AS "workspaceWorktreePath",
+          workspaces.local_checkout AS "workspaceLocalCheckout",
+          threads.title,
+          threads.model_selection_json AS "modelSelection",
+          threads.runtime_mode AS "runtimeMode",
+          threads.interaction_mode AS "interactionMode",
+          threads.branch,
+          threads.worktree_path AS "worktreePath",
+          threads.latest_turn_id AS "latestTurnId",
+          threads.created_at AS "createdAt",
+          threads.updated_at AS "updatedAt",
+          threads.archived_at AS "archivedAt",
+          threads.latest_user_message_at AS "latestUserMessageAt",
+          threads.pending_approval_count AS "pendingApprovalCount",
+          threads.pending_user_input_count AS "pendingUserInputCount",
+          threads.has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          threads.deleted_at AS "deletedAt"
+        FROM projection_threads AS threads
+        LEFT JOIN projection_workspaces AS workspaces
+          ON workspaces.workspace_id = threads.workspace_id
+        ORDER BY threads.created_at ASC, threads.thread_id ASC
       `,
   });
 
@@ -349,27 +379,33 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
-        FROM projection_threads
-        WHERE deleted_at IS NULL
-          AND archived_at IS NULL
-        ORDER BY project_id ASC, created_at ASC, thread_id ASC
+          threads.thread_id AS "threadId",
+          threads.project_id AS "projectId",
+          threads.workspace_id AS "workspaceId",
+          workspaces.branch AS "workspaceBranch",
+          workspaces.worktree_path AS "workspaceWorktreePath",
+          workspaces.local_checkout AS "workspaceLocalCheckout",
+          threads.title,
+          threads.model_selection_json AS "modelSelection",
+          threads.runtime_mode AS "runtimeMode",
+          threads.interaction_mode AS "interactionMode",
+          threads.branch,
+          threads.worktree_path AS "worktreePath",
+          threads.latest_turn_id AS "latestTurnId",
+          threads.created_at AS "createdAt",
+          threads.updated_at AS "updatedAt",
+          threads.archived_at AS "archivedAt",
+          threads.latest_user_message_at AS "latestUserMessageAt",
+          threads.pending_approval_count AS "pendingApprovalCount",
+          threads.pending_user_input_count AS "pendingUserInputCount",
+          threads.has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          threads.deleted_at AS "deletedAt"
+        FROM projection_threads AS threads
+        LEFT JOIN projection_workspaces AS workspaces
+          ON workspaces.workspace_id = threads.workspace_id
+        WHERE threads.deleted_at IS NULL
+          AND threads.archived_at IS NULL
+        ORDER BY threads.project_id ASC, threads.created_at ASC, threads.thread_id ASC
       `,
   });
 
@@ -379,27 +415,33 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
-        FROM projection_threads
-        WHERE deleted_at IS NULL
-          AND archived_at IS NOT NULL
-        ORDER BY project_id ASC, archived_at DESC, thread_id DESC
+          threads.thread_id AS "threadId",
+          threads.project_id AS "projectId",
+          threads.workspace_id AS "workspaceId",
+          workspaces.branch AS "workspaceBranch",
+          workspaces.worktree_path AS "workspaceWorktreePath",
+          workspaces.local_checkout AS "workspaceLocalCheckout",
+          threads.title,
+          threads.model_selection_json AS "modelSelection",
+          threads.runtime_mode AS "runtimeMode",
+          threads.interaction_mode AS "interactionMode",
+          threads.branch,
+          threads.worktree_path AS "worktreePath",
+          threads.latest_turn_id AS "latestTurnId",
+          threads.created_at AS "createdAt",
+          threads.updated_at AS "updatedAt",
+          threads.archived_at AS "archivedAt",
+          threads.latest_user_message_at AS "latestUserMessageAt",
+          threads.pending_approval_count AS "pendingApprovalCount",
+          threads.pending_user_input_count AS "pendingUserInputCount",
+          threads.has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          threads.deleted_at AS "deletedAt"
+        FROM projection_threads AS threads
+        LEFT JOIN projection_workspaces AS workspaces
+          ON workspaces.workspace_id = threads.workspace_id
+        WHERE threads.deleted_at IS NULL
+          AND threads.archived_at IS NOT NULL
+        ORDER BY threads.project_id ASC, threads.archived_at DESC, threads.thread_id DESC
       `,
   });
 
@@ -741,27 +783,33 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: ({ threadId }) =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          latest_user_message_at AS "latestUserMessageAt",
-          pending_approval_count AS "pendingApprovalCount",
-          pending_user_input_count AS "pendingUserInputCount",
-          has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
-        FROM projection_threads
-        WHERE thread_id = ${threadId}
-          AND deleted_at IS NULL
-          AND archived_at IS NULL
+          threads.thread_id AS "threadId",
+          threads.project_id AS "projectId",
+          threads.workspace_id AS "workspaceId",
+          workspaces.branch AS "workspaceBranch",
+          workspaces.worktree_path AS "workspaceWorktreePath",
+          workspaces.local_checkout AS "workspaceLocalCheckout",
+          threads.title,
+          threads.model_selection_json AS "modelSelection",
+          threads.runtime_mode AS "runtimeMode",
+          threads.interaction_mode AS "interactionMode",
+          threads.branch,
+          threads.worktree_path AS "worktreePath",
+          threads.latest_turn_id AS "latestTurnId",
+          threads.created_at AS "createdAt",
+          threads.updated_at AS "updatedAt",
+          threads.archived_at AS "archivedAt",
+          threads.latest_user_message_at AS "latestUserMessageAt",
+          threads.pending_approval_count AS "pendingApprovalCount",
+          threads.pending_user_input_count AS "pendingUserInputCount",
+          threads.has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          threads.deleted_at AS "deletedAt"
+        FROM projection_threads AS threads
+        LEFT JOIN projection_workspaces AS workspaces
+          ON workspaces.workspace_id = threads.workspace_id
+        WHERE threads.thread_id = ${threadId}
+          AND threads.deleted_at IS NULL
+          AND threads.archived_at IS NULL
         LIMIT 1
       `,
   });
@@ -1175,6 +1223,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
                 id: row.threadId,
                 projectId: row.projectId,
+                ...mapThreadWorkspaceFields(row),
                 title: row.title,
                 modelSelection: row.modelSelection,
                 runtimeMode: row.runtimeMode,
@@ -1373,6 +1422,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 threads.push({
                   id: row.threadId,
                   projectId: row.projectId,
+                  ...mapThreadWorkspaceFields(row),
                   title: row.title,
                   modelSelection: row.modelSelection,
                   runtimeMode: row.runtimeMode,
@@ -1502,6 +1552,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   ? Result.succeed({
                       id: row.threadId,
                       projectId: row.projectId,
+                      ...mapThreadWorkspaceFields(row),
                       title: row.title,
                       modelSelection: row.modelSelection,
                       runtimeMode: row.runtimeMode,
@@ -1636,6 +1687,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 (row): OrchestrationThreadShell => ({
                   id: row.threadId,
                   projectId: row.projectId,
+                  ...mapThreadWorkspaceFields(row),
                   title: row.title,
                   modelSelection: row.modelSelection,
                   runtimeMode: row.runtimeMode,
@@ -1876,6 +1928,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       return Option.some({
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
+        ...mapThreadWorkspaceFields(threadRow.value),
         title: threadRow.value.title,
         modelSelection: threadRow.value.modelSelection,
         runtimeMode: threadRow.value.runtimeMode,
@@ -1970,6 +2023,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       const thread = {
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
+        ...mapThreadWorkspaceFields(threadRow.value),
         title: threadRow.value.title,
         modelSelection: threadRow.value.modelSelection,
         runtimeMode: threadRow.value.runtimeMode,

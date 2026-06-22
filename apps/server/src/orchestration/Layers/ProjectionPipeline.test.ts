@@ -173,6 +173,188 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       }
     }),
   );
+
+  it.effect("persists workspace identity and updates workspace metadata on branch rename", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const renamedAt = "2026-01-01T00:05:00.000Z";
+
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.make("evt-workspace-thread-created"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-workspace"),
+        occurredAt: createdAt,
+        commandId: CommandId.make("cmd-workspace-thread-created"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-workspace-thread-created"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-workspace"),
+          projectId: ProjectId.make("project-workspace"),
+          title: "Workspace thread",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: "feature/old-name",
+          worktreePath: "/repo/.t3/worktrees/checks",
+          createdAt,
+          updatedAt: createdAt,
+        },
+      });
+      yield* eventStore.append({
+        type: "thread.meta-updated",
+        eventId: EventId.make("evt-workspace-thread-renamed"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-workspace"),
+        occurredAt: renamedAt,
+        commandId: CommandId.make("cmd-workspace-thread-renamed"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-workspace-thread-renamed"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-workspace"),
+          branch: "feature/new-name",
+          updatedAt: renamedAt,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const rows = yield* sql<{
+        readonly threadWorkspaceId: string | null;
+        readonly workspaceId: string;
+        readonly branch: string | null;
+        readonly worktreePath: string | null;
+      }>`
+        SELECT
+          threads.workspace_id AS "threadWorkspaceId",
+          workspaces.workspace_id AS "workspaceId",
+          workspaces.branch,
+          workspaces.worktree_path AS "worktreePath"
+        FROM projection_threads AS threads
+        INNER JOIN projection_workspaces AS workspaces
+          ON workspaces.workspace_id = threads.workspace_id
+        WHERE threads.thread_id = 'thread-workspace'
+      `;
+
+      assert.deepEqual(rows, [
+        {
+          threadWorkspaceId: "project-workspace:workspace:worktree:/repo/.t3/worktrees/checks",
+          workspaceId: "project-workspace:workspace:worktree:/repo/.t3/worktrees/checks",
+          branch: "feature/new-name",
+          worktreePath: "/repo/.t3/worktrees/checks",
+        },
+      ]);
+    }),
+  );
+
+  it.effect(
+    "moves one thread to a worktree workspace without relabeling sibling branch threads",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        const movedAt = "2026-01-01T00:05:00.000Z";
+
+        for (const threadId of ["thread-branch-a", "thread-branch-b"] as const) {
+          yield* eventStore.append({
+            type: "thread.created",
+            eventId: EventId.make(`evt-${threadId}-created`),
+            aggregateKind: "thread",
+            aggregateId: ThreadId.make(threadId),
+            occurredAt: createdAt,
+            commandId: CommandId.make(`cmd-${threadId}-created`),
+            causationEventId: null,
+            correlationId: CommandId.make(`cmd-${threadId}-created`),
+            metadata: {},
+            payload: {
+              threadId: ThreadId.make(threadId),
+              projectId: ProjectId.make("project-workspace-move"),
+              title: threadId,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5-codex",
+              },
+              runtimeMode: "full-access",
+              branch: "feat/enhancements",
+              worktreePath: null,
+              createdAt,
+              updatedAt: createdAt,
+            },
+          });
+        }
+
+        yield* eventStore.append({
+          type: "thread.meta-updated",
+          eventId: EventId.make("evt-thread-branch-a-moved"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-branch-a"),
+          occurredAt: movedAt,
+          commandId: CommandId.make("cmd-thread-branch-a-moved"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-thread-branch-a-moved"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-branch-a"),
+            branch: "t3code/handle-greeting",
+            worktreePath: "/repo/.t3/worktrees/handle-greeting",
+            updatedAt: movedAt,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly threadId: string;
+          readonly threadWorkspaceId: string | null;
+          readonly threadBranch: string | null;
+          readonly threadWorktreePath: string | null;
+          readonly workspaceBranch: string | null;
+          readonly workspaceWorktreePath: string | null;
+        }>`
+        SELECT
+          threads.thread_id AS "threadId",
+          threads.workspace_id AS "threadWorkspaceId",
+          threads.branch AS "threadBranch",
+          threads.worktree_path AS "threadWorktreePath",
+          workspaces.branch AS "workspaceBranch",
+          workspaces.worktree_path AS "workspaceWorktreePath"
+        FROM projection_threads AS threads
+        INNER JOIN projection_workspaces AS workspaces
+          ON workspaces.workspace_id = threads.workspace_id
+        WHERE threads.thread_id IN ('thread-branch-a', 'thread-branch-b')
+        ORDER BY threads.thread_id ASC
+      `;
+
+        assert.deepEqual(rows, [
+          {
+            threadId: "thread-branch-a",
+            threadWorkspaceId:
+              "project-workspace-move:workspace:worktree:/repo/.t3/worktrees/handle-greeting",
+            threadBranch: "t3code/handle-greeting",
+            threadWorktreePath: "/repo/.t3/worktrees/handle-greeting",
+            workspaceBranch: "t3code/handle-greeting",
+            workspaceWorktreePath: "/repo/.t3/worktrees/handle-greeting",
+          },
+          {
+            threadId: "thread-branch-b",
+            threadWorkspaceId: "project-workspace-move:workspace:branch:feat/enhancements",
+            threadBranch: "feat/enhancements",
+            threadWorktreePath: null,
+            workspaceBranch: "feat/enhancements",
+            workspaceWorktreePath: null,
+          },
+        ]);
+      }),
+  );
 });
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(

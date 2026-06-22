@@ -44,14 +44,6 @@ await waitForResources({
   tcpPort: port,
 });
 
-const childEnv = { ...process.env };
-delete childEnv.ELECTRON_RUN_AS_NODE;
-const devProtocolClient = resolveDevProtocolClient();
-if (devProtocolClient) {
-  childEnv.T3CODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
-  childEnv.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
-}
-
 let shuttingDown = false;
 let restartTimer = null;
 let currentApp = null;
@@ -75,6 +67,37 @@ function cleanupStaleDevApps() {
   NodeChildProcess.spawnSync("pkill", ["-f", "--", `--t3code-dev-root=${desktopDir}`], {
     stdio: "ignore",
   });
+  NodeChildProcess.spawnSync(
+    "pkill",
+    ["-f", "--", `${NodePath.join(desktopDir, ".electron-runtime")}/T3 Code (Dev).app`],
+    {
+      stdio: "ignore",
+    },
+  );
+}
+
+function isShellScript(path) {
+  try {
+    const buffer = Buffer.alloc(2);
+    const fd = NodeFS.openSync(path, "r");
+    try {
+      NodeFS.readSync(fd, buffer, 0, buffer.length, 0);
+      return buffer[0] === 0x23 && buffer[1] === 0x21;
+    } finally {
+      NodeFS.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+cleanupStaleDevApps();
+const childEnv = { ...process.env };
+delete childEnv.ELECTRON_RUN_AS_NODE;
+const devProtocolClient = resolveDevProtocolClient();
+if (devProtocolClient) {
+  childEnv.T3CODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
+  childEnv.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
 }
 
 function startApp() {
@@ -85,11 +108,12 @@ function startApp() {
   const electronArgs = remoteDebuggingPort
     ? [`--remote-debugging-port=${remoteDebuggingPort}`]
     : [];
-  const launchArgs = devProtocolClient
-    ? electronArgs
-    : [...electronArgs, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.cjs"];
-  const electronCommand = resolveElectronLaunchCommand(launchArgs);
-  const app = NodeChildProcess.spawn(electronCommand.electronPath, electronCommand.args, {
+  const electronCommand = resolveElectronLaunchCommand(electronArgs);
+  const launchArgs =
+    devProtocolClient && isShellScript(electronCommand.electronPath)
+      ? electronCommand.args
+      : [...electronCommand.args, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.cjs"];
+  const app = NodeChildProcess.spawn(electronCommand.electronPath, launchArgs, {
     cwd: desktopDir,
     env: childEnv,
     stdio: "inherit",
@@ -233,7 +257,6 @@ async function shutdown(exitCode) {
 }
 
 startWatchers();
-cleanupStaleDevApps();
 startApp();
 
 process.once("SIGINT", () => {

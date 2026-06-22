@@ -27,7 +27,10 @@ import {
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
-import { resolveThreadWorkspaceIdentityPatch } from "./threadWorkspaceIdentity.ts";
+import {
+  deriveThreadWorkspaceRecord,
+  resolveThreadWorkspaceRecordForPatch,
+} from "./threadWorkspaceIdentity.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
@@ -272,11 +275,16 @@ export function projectEvent(
           event.type,
           "payload",
         );
+        const workspace = deriveThreadWorkspaceRecord(payload);
         const thread: OrchestrationThread = yield* decodeForEvent(
           OrchestrationThread,
           {
             id: payload.threadId,
             projectId: payload.projectId,
+            workspaceId: workspace.workspaceId,
+            workspaceBranch: workspace.branch,
+            workspaceWorktreePath: workspace.worktreePath,
+            workspaceLocalCheckout: workspace.localCheckout === 1,
             title: payload.title,
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
@@ -352,7 +360,32 @@ export function projectEvent(
               ...(payload.modelSelection !== undefined
                 ? { modelSelection: payload.modelSelection }
                 : {}),
-              ...resolveThreadWorkspaceIdentityPatch(thread, payload),
+              ...(() => {
+                const threadWorkspaceUpdate = resolveThreadWorkspaceRecordForPatch({
+                  projectId: thread.projectId,
+                  thread,
+                  patch: payload,
+                });
+                const threadWorkspacePatch = threadWorkspaceUpdate.patch;
+                if (
+                  threadWorkspacePatch.branch === undefined &&
+                  threadWorkspacePatch.worktreePath === undefined
+                ) {
+                  return {};
+                }
+                const workspace = threadWorkspaceUpdate.workspace;
+                return {
+                  ...threadWorkspacePatch,
+                  ...(workspace
+                    ? {
+                        workspaceId: workspace.workspaceId,
+                        workspaceBranch: workspace.branch,
+                        workspaceWorktreePath: workspace.worktreePath,
+                        workspaceLocalCheckout: workspace.localCheckout === 1,
+                      }
+                    : {}),
+                };
+              })(),
               updatedAt: payload.updatedAt,
             };
           }),

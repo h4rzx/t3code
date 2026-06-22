@@ -55,6 +55,17 @@ export function buildLocalDraftThread(
   };
 }
 
+export function resolveBranchForNewThreadMetadata(input: {
+  activeThreadBranch: string | null;
+  activeWorktreePath: string | null;
+  currentGitBranch: string | null;
+}): string | null {
+  if (input.activeWorktreePath && input.currentGitBranch) {
+    return input.currentGitBranch;
+  }
+  return input.activeThreadBranch;
+}
+
 export function shouldWriteThreadErrorToCurrentServerThread(input: {
   serverThread:
     | {

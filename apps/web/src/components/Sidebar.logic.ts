@@ -535,6 +535,9 @@ export function buildDefaultWorkspacesForThreads<
   TThread extends {
     id: Thread["id"];
     title: string;
+    workspaceId?: string | null | undefined;
+    workspaceBranch?: string | null | undefined;
+    workspaceWorktreePath?: string | null | undefined;
     branch: string | null;
     worktreePath: string | null;
     createdAt: string;
@@ -549,14 +552,24 @@ export function buildDefaultWorkspacesForThreads<
 
   for (const thread of input.threads) {
     const threadKey = input.getThreadKey(thread);
+    const persistedWorkspaceId = normalizeWorkspaceContextValue(thread.workspaceId ?? null);
+    const workspaceBranch = thread.workspaceBranch ?? thread.branch;
+    const workspaceWorktreePath = thread.workspaceWorktreePath ?? thread.worktreePath;
     const contextKey = defaultWorkspaceContextKey({
-      branch: thread.branch,
-      worktreePath: thread.worktreePath,
+      branch: workspaceBranch,
+      worktreePath: workspaceWorktreePath,
     });
-    const existing = workspaceByContextKey.get(contextKey);
+    const workspaceKey = persistedWorkspaceId ?? contextKey;
+    const existing = workspaceByContextKey.get(workspaceKey);
     if (existing) {
-      workspaceByContextKey.set(contextKey, {
+      workspaceByContextKey.set(workspaceKey, {
         ...existing,
+        title: resolveDefaultWorkspaceTitle({
+          branch: workspaceBranch,
+          worktreePath: workspaceWorktreePath,
+        }),
+        branch: workspaceBranch,
+        worktreePath: workspaceWorktreePath,
         threads: [...existing.threads, thread],
         createdAt: minIsoTimestamp(existing.createdAt, thread.createdAt),
         updatedAt: maxIsoTimestamp(existing.updatedAt, thread.updatedAt),
@@ -564,15 +577,15 @@ export function buildDefaultWorkspacesForThreads<
       continue;
     }
 
-    workspaceByContextKey.set(contextKey, {
-      id: `${input.projectKey}:workspace:${contextKey}`,
+    workspaceByContextKey.set(workspaceKey, {
+      id: `${input.projectKey}:workspace:${workspaceKey}`,
       projectKey: input.projectKey,
       title: resolveDefaultWorkspaceTitle({
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
+        branch: workspaceBranch,
+        worktreePath: workspaceWorktreePath,
       }),
-      branch: thread.branch,
-      worktreePath: thread.worktreePath,
+      branch: workspaceBranch,
+      worktreePath: workspaceWorktreePath,
       lastActiveThreadKey: threadKey,
       threads: [thread],
       createdAt: thread.createdAt,
