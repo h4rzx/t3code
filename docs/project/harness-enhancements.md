@@ -703,22 +703,41 @@ Initial implementation notes:
 
 ## P1: Fork Release Policy
 
-Define when this fork should publish a GitHub Release instead of staying as synced development work.
+Define when this fork should publish an installable GitHub Release for the user's own devices instead
+of waiting for upstream to merge and release harness work.
 
 Default rule:
 
 - Do not create a fork release after every upstream sync.
 - Treat upstream syncs as maintenance, not release events.
-- Create a fork release only when there is a concrete install/test/distribution reason.
+- Create a fork release when the fork has a coherent fix or harness milestone that is useful enough
+  to install on another device.
+- Fork releases are for personal dogfooding and trusted testers first; upstream PRs should still be
+  small, focused, and based from `upstream-main`.
 
 Create a fork prerelease when:
 
 - A harness feature needs desktop dogfooding outside `vp run dev:sandbox`.
-- Another machine or tester needs an installable app artifact.
+- Another personal machine or trusted tester needs an installable app artifact.
 - A migration or workspace/data behavior needs validation against packaged desktop state.
 - The release/update pipeline itself needs a smoke test.
 - A milestone has a coherent user-visible improvement, such as workspace identity plus sidebar polish,
   `.context` v1, durable task list v1, setup/file-copy v1, or review-surface v1.
+
+Good first fork prerelease candidates:
+
+- Workspace foundation release: dev/prod isolation, upstream sync tooling, durable workspace identity,
+  and the Project -> Workspace -> Chat sidebar are all working without data loss.
+- Context v1 release: `.context/` creation, basic read/write helpers, and gitignore handling are working
+  for packaged desktop builds.
+- Task state v1 release: durable workspace task state exists, renders in the UI, and mirrors to
+  `.context/tasks.md`.
+- Workspace setup v1 release: setup scripts plus `.env*`/local file copy rules work in new worktrees
+  with visible copy/setup results.
+- Autonomy reliability release: sleep prevention, source-control target resolution, and basic checks
+  readiness are reliable enough for long-running work on another machine.
+- Review workflow release: integrated file review opens from changed files/diffs, has persistent
+  collapse/review state, and can send selected context back to the agent.
 
 Create a fork stable release only when:
 
@@ -728,6 +747,8 @@ Create a fork stable release only when:
 - The release workflow/secrets are configured for the fork, or unsupported publish/deploy steps are disabled.
 - Data compatibility is understood, especially for workspace migrations and app-data changes.
 - There is a clear rollback path to the previous fork release or upstream release.
+- The current prerelease has been used on at least one real machine without blocker data-loss,
+  launch, update, or workspace migration issues.
 
 Do not create a fork release when:
 
@@ -736,6 +757,7 @@ Do not create a fork release when:
 - There is active unreviewed migration work.
 - The only purpose is "we synced upstream."
 - Local dev or a sandbox build is enough.
+- The branch has only partial internal plumbing with no user-visible install benefit yet.
 
 Recommended fork release shape:
 
@@ -758,7 +780,16 @@ Pre-release checklist:
 4. Run `vp run typecheck`.
 5. Run tests relevant to changed areas.
 6. Run `node scripts/release-smoke.ts` before touching release workflow behavior.
-7. Create a prerelease tag only after the above is green.
+7. Confirm the release branch has a user-visible install reason from the candidate list above.
+8. Create a prerelease tag only after the above is green.
+
+Branch policy:
+
+- Personal fork releases can come from the fork's `main` or a dedicated release branch cut from it.
+- Upstream contribution PRs should not come from the fork's `main`; create those from `upstream-main`
+  so the PR contains only the small upstreamable fix.
+- If a personal release needs emergency fixes while `main` is unstable, cut a `release/harness-*`
+  branch from the last good fork release and cherry-pick only the needed fixes.
 
 ## P1: Workspace Lifecycle Dashboard
 
