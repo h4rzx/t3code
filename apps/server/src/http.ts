@@ -44,15 +44,17 @@ import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./ht
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-const DESKTOP_APP_ORIGINS = ["t3code://app", "t3code-dev://app"] as const;
+const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"] as const;
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const devOrigin = config.devUrl?.origin;
+    // Dev uses credentialed requests from Vite or the Electron custom origin, so both must be
+    // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
     return HttpRouter.cors({
       ...(devOrigin
-        ? { allowedOrigins: [devOrigin, ...DESKTOP_APP_ORIGINS], credentials: true }
+        ? { allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS], credentials: true }
         : {}),
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,

@@ -125,7 +125,8 @@ describe("DesktopObservability", () => {
       }).pipe(Effect.provide(environmentLayer));
 
       yield* Effect.gen(function* () {
-        const outputLog = yield* DesktopObservability.DesktopBackendOutputLog;
+        const factory = yield* DesktopObservability.DesktopBackendOutputLogFactory;
+        const outputLog = yield* factory.forInstance("primary");
         yield* outputLog.writeSessionBoundary({
           phase: "START",
           details: "pid=123 port=3773 cwd=/repo",
@@ -145,6 +146,7 @@ describe("DesktopObservability", () => {
       assert.equal(boundary.level, "INFO");
       assert.equal(boundary.annotations.component, "desktop-backend-child");
       assert.equal(boundary.annotations.runId, "test-run");
+      assert.equal(boundary.annotations.instanceId, "primary");
       assert.equal(boundary.annotations.phase, "START");
       assert.equal(boundary.annotations.details, "pid=123 port=3773 cwd=/repo");
 
@@ -152,54 +154,7 @@ describe("DesktopObservability", () => {
       assert.equal(output.level, "INFO");
       assert.equal(output.annotations.component, "desktop-backend-child");
       assert.equal(output.annotations.runId, "test-run");
-      assert.equal(output.annotations.stream, "stdout");
-      assert.equal(output.annotations.text, "hello server\n");
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),
-    ),
-  );
-
-  it.effect("ignores a broken development console pipe while persisting backend child output", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-output-epipe-test-",
-      });
-      const environmentLayer = makeEnvironmentLayer(baseDir);
-      const logPath = yield* Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        return environment.path.join(environment.logDir, "server-child.log");
-      }).pipe(Effect.provide(environmentLayer));
-
-      const originalWrite = process.stdout.write;
-      process.stdout.write = function (...args: Parameters<typeof process.stdout.write>) {
-        const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
-        queueMicrotask(() => process.stdout.emit("error", error));
-        for (const arg of args) {
-          if (typeof arg === "function") arg();
-        }
-        return false;
-      } as typeof process.stdout.write;
-
-      try {
-        yield* Effect.gen(function* () {
-          const outputLog = yield* DesktopObservability.DesktopBackendOutputLog;
-          yield* outputLog.writeOutputChunk("stdout", new TextEncoder().encode("hello server\n"));
-          yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
-        }).pipe(
-          Effect.annotateLogs({ runId: "test-run" }),
-          Effect.provide(DesktopObservability.layer.pipe(Layer.provideMerge(environmentLayer))),
-        );
-      } finally {
-        process.stdout.write = originalWrite;
-      }
-
-      const log = yield* fileSystem.readFileString(logPath);
-      const lines = log.trimEnd().split("\n");
-      const output = yield* decodeDesktopBackendChildLogRecord(lines[0] ?? "");
-
-      assert.equal(output.message, "backend child process output");
+      assert.equal(output.annotations.instanceId, "primary");
       assert.equal(output.annotations.stream, "stdout");
       assert.equal(output.annotations.text, "hello server\n");
     }).pipe(

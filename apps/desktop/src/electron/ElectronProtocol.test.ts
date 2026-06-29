@@ -84,10 +84,10 @@ describe("ElectronProtocol", () => {
             handler!(
               new Request("t3code-dev://app/api/health?verbose=1", {
                 headers: {
-                  Accept: "application/json",
-                  Origin: "t3code-dev://app",
-                  Referer: "t3code-dev://app/",
-                  "Sec-Fetch-Site": "same-origin",
+                  accept: "application/json",
+                  origin: "t3code-dev://app",
+                  referer: "t3code-dev://app/",
+                  "sec-fetch-site": "same-origin",
                 },
               }),
             ),
@@ -117,9 +117,11 @@ describe("ElectronProtocol", () => {
         ["t3code-dev"],
       );
       assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
-      assert.deepEqual(Array.from(netFetchMock.mock.calls[0]?.[1]?.headers ?? []), [
-        ["accept", "application/json"],
-      ]);
+      const forwardedHeaders = new Headers(netFetchMock.mock.calls[0]?.[1]?.headers);
+      assert.equal(forwardedHeaders.get("accept"), "application/json");
+      assert.isNull(forwardedHeaders.get("origin"));
+      assert.isNull(forwardedHeaders.get("referer"));
+      assert.isNull(forwardedHeaders.get("sec-fetch-site"));
       assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
@@ -146,6 +148,34 @@ describe("ElectronProtocol", () => {
 
       assert.equal(response.status, 404);
       assert.equal(netFetchMock.mock.calls.length, 0);
+    }).pipe(Effect.provide(ElectronProtocol.layer)),
+  );
+
+  it.effect("retries transient renderer target failures", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      netFetchMock
+        .mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5733"))
+        .mockResolvedValueOnce(new Response("ready"));
+
+      const response = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "t3code-dev",
+            targetOrigin: new URL("http://127.0.0.1:5733/"),
+            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: undefined,
+          });
+          return yield* Effect.promise(() => handler!(new Request("t3code-dev://app/")));
+        }),
+      );
+
+      assert.equal(yield* Effect.promise(() => response.text()), "ready");
+      assert.equal(netFetchMock.mock.calls.length, 2);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 
