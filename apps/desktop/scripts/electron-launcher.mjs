@@ -361,10 +361,7 @@ function resolveLinuxSandboxArgs(electronBinaryPath) {
 }
 
 export function resolveElectronPath() {
-  ensureElectronRuntime();
-
-  const require = NodeModule.createRequire(import.meta.url);
-  const electronBinaryPath = require("electron");
+  const electronBinaryPath = resolveElectronBinaryPath();
 
   if (hostPlatform !== "darwin") {
     return electronBinaryPath;
@@ -381,13 +378,23 @@ export function resolveElectronLaunchCommand(args = []) {
   };
 }
 
+export function resolveElectronBinaryPath({
+  ensureRuntime = ensureElectronRuntime,
+  createRequire = NodeModule.createRequire,
+  moduleUrl = import.meta.url,
+} = {}) {
+  ensureRuntime();
+
+  const require = createRequire(moduleUrl);
+  return require("electron");
+}
+
 export function resolveDevProtocolClient() {
   if (hostPlatform !== "darwin" || !isDevelopment) {
     return null;
   }
 
-  const require = NodeModule.createRequire(import.meta.url);
-  const electronBinaryPath = require("electron");
+  const electronBinaryPath = resolveElectronBinaryPath();
   const launcherBinaryPath = buildMacLauncher(electronBinaryPath);
   return {
     appBundlePath: NodePath.resolve(launcherBinaryPath, "..", "..", ".."),
