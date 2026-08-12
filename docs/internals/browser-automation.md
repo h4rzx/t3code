@@ -62,63 +62,43 @@ webview.
 Kept here rather than in a tracker because each one is a trap for the next person reading
 this code, and several look fixed from the outside.
 
-### Typed errors flatten to `execution_failed`
+### Refs are ours, not Playwright's
 
-The desktop raises specific errors (`PreviewAutomationInvalidSelectorError` and friends), but
-callers see `preview_execution_failed`. Verified from traces: the desktop side is correct and
-the server's `classifyResponseError` receives a tag it does not recognise.
+The snapshot carries server-assigned refs (`@e1`) resolved through selectors, while the
+aria tree is rendered in `autoexpect` mode specifically so it emits none of its own —
+two ref schemes in one payload would be worse than none. Playwright's `aria-ref=` engine
+is more robust than selector round-tripping, and unifying on it would remove the
+`refRegistry` entirely, but it is a larger change to ref resolution and staleness than it
+looks.
 
-`previewAutomationErrors.ts` maps desktop tags to host errors in `fromCause`, and only
-`PreviewAutomationTargetNotEditableError` was ever mapped. It is not yet established whether
-that mapping fires either — if it does not, _every_ typed error has been flattening, and the
-fix belongs at the IPC boundary rather than in per-tag mappings. Settle it by logging the
-shape of `cause` inside `fromCause` before adding more cases.
+### `extract --scroll` cannot see what the list never renders
 
-### Snapshots cannot capture a hidden preview
-
-`capturePage()` never settles when the webview has not painted, and `Page.captureScreenshot`
-does not help — Chromium still needs the renderer to produce a frame. Snapshots therefore
-return `screenshot: null` whenever the preview panel is closed, which is exactly the
-background-automation case. `Emulation.setDeviceMetricsOverride` or `Page.startScreencast`
-can force frame production; neither is implemented.
-
-### `extract` only sees the DOM
-
-Virtualized lists (react-window and similar) do not have their rows in the DOM until
-rendered, so `extract` reports only what happens to be materialised. There is no
-scroll-until-stable fallback, and no dedup by row key to make one safe.
-
-For API-backed dashboards, in-page `fetch('/api/...')` through `eval` is cheaper and more
-reliable than any DOM read. It is documented in the skill but is not a first-class command.
-
-### Snapshot shape is text, not structure
-
-`visibleText` plus a flat element list needs ~20k characters to convey what an accessibility
-tree conveys in a fraction of that, and it discards the structure that would tell a caller a
-table is a table. Playwright's aria snapshot is the better shape; switching is a contract
-change touching both the web UI and MCP.
+The scroll fallback finds rows a virtualized list materialises as it goes, and reports
+`complete: false` when the cap is reached with rows still arriving. It still cannot see a
+list that paginates on the server, and it deduplicates by row content, so two genuinely
+identical rows collapse into one. For an API-backed dashboard, in-page `fetch('/api/...')`
+through `eval` remains cheaper and exact.
 
 ### Cookie import
 
-- Values with bytes above 0x7F are rejected by `session.cookies.set()` and counted as skips
-  (~0.3% of a real profile). Writing the partition's SQLite directly and swapping it in at
-  cold start is the known fix.
-- Safari needs Full Disk Access; without it the read fails with `EPERM`. Untested end to end.
+- Values Chromium's parser refuses are counted as `rejected` and dropped (~0.3% of a real
+  profile). Recovering them means either altering the value, which breaks it for the site,
+  or writing the encrypted store directly and swapping it in at cold start.
+- Safari needs Full Disk Access; without it the read fails with `EPERM`. Untested end to
+  end.
 - Windows (DPAPI) and Linux v11 (login keyring) are unimplemented; Linux v10 works.
-
-### Dev loop
-
-Killing the Electron parent does not reap its server child, leaving an orphan holding the
-server port. The next launch cannot bind, and the app fails to boot with a
-`PrimaryEnvironmentRequestError` from `fetch-session-state` that looks like an auth bug.
-`dev-electron.mjs` should terminate the child on parent exit.
 
 ### Test coverage
 
-The pure layers are well covered; the seams are not. Cookie decryption, extraction shaping,
-and browser detection have unit tests, but nothing exercises a real profile, a real page, or
-a real automation round trip. The `expires_utc` overflow broke every Chromium import and the
-suite stayed green throughout, because it lived in the one layer with no test.
+The pure layers are well covered, and the cookie read seam now has a real SQLite fixture —
+`CookieImportService.test.ts` reproduces the `expires_utc` overflow that broke every
+Chromium import while the suite stayed green.
 
-`CookieImportService.ts` has no tests at all: `it.effect` does not run in this repo
-("Vitest failed to find the current suite"), which rules out testing Effect services.
+Nothing exercises a real page or a real automation round trip. The snapshot path, ref
+resolution, and the scroll fallback are all verified by hand against live sites, which
+means a regression in any of them reaches a user before it reaches CI. The blocker is a
+host: automation needs a connected client, and there is no headless one.
+
+Note for anyone who reads an older version of this file: `it.effect` does work in this
+repo. It fails only when `it` is imported from `vite-plus/test` instead of
+`@effect/vitest`.
