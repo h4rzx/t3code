@@ -488,6 +488,14 @@ export const PreviewAutomationWaitForInput = Schema.Struct({
 export type PreviewAutomationWaitForInput = typeof PreviewAutomationWaitForInput.Type;
 
 export const PreviewAutomationElement = Schema.Struct({
+  /**
+   * Stable handle for this element within the snapshot that produced it, e.g.
+   * `@e3`. Actions accept it in place of a selector, which removes the guessing
+   * game of writing a locator that matches. Assigned by the server, so hosts
+   * predating refs simply omit it. Invalidated by the next snapshot or a
+   * navigation.
+   */
+  ref: Schema.optional(TrimmedNonEmptyString),
   tag: Schema.String,
   role: Schema.NullOr(Schema.String),
   name: Schema.String,
@@ -533,16 +541,31 @@ export const PreviewAutomationSnapshot = Schema.Struct({
   loading: Schema.Boolean,
   visibleText: Schema.String,
   interactiveElements: Schema.Array(PreviewAutomationElement),
+  /**
+   * What the page actually holds, before the host's own caps. Without these a
+   * caller cannot distinguish a short page from a truncated read, because the
+   * host slices text and elements before anyone downstream sees them.
+   */
+  visibleTextTotal: Schema.optional(Schema.Int),
+  interactiveElementsTotal: Schema.optional(Schema.Int),
   accessibilityTree: Schema.Unknown,
   consoleEntries: Schema.Array(PreviewAutomationConsoleEntry),
   networkEntries: Schema.Array(PreviewAutomationNetworkEntry),
   actionTimeline: Schema.Array(PreviewAutomationActionEvent),
-  screenshot: Schema.Struct({
-    mimeType: Schema.Literal("image/png"),
-    data: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-  }),
+  /**
+   * Null when the page could not be captured — most often because the preview
+   * is not on screen, so there is no painted frame to grab. The element tree
+   * is what automation actually acts on, so a missing image degrades the
+   * snapshot rather than failing it.
+   */
+  screenshot: Schema.NullOr(
+    Schema.Struct({
+      mimeType: Schema.Literal("image/png"),
+      data: Schema.String,
+      width: Schema.Int,
+      height: Schema.Int,
+    }),
+  ),
 });
 export type PreviewAutomationSnapshot = typeof PreviewAutomationSnapshot.Type;
 
