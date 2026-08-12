@@ -144,5 +144,6 @@ const EMPTY_COUNTS = {
     expired: 0,
     invalid_domain: 0,
     empty_name: 0,
+    rejected: 0,
   },
 };

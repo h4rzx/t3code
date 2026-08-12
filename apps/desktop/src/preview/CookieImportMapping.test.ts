@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   cookieUrl,
+  describeCookieWriteFailure,
   emptyImportSummary,
   mapChromiumCookie,
   mapSameSite,
@@ -114,5 +115,27 @@ describe("tallyMapping", () => {
     expect(summary.imported).toBe(1);
     expect(summary.skipped.device_bound).toBe(1);
     expect(summary.skipped.decryption_failed).toBe(1);
+  });
+});
+
+describe("describeCookieWriteFailure", () => {
+  it("reads a domain rejection as a domain problem", () => {
+    expect(
+      describeCookieWriteFailure(
+        new Error("Failed to set cookie with an invalid domain attribute"),
+      ),
+    ).toBe("invalid_domain");
+  });
+
+  it("treats anything else as a dropped cookie", () => {
+    // Filing this under the domain hid the only bucket that represents a
+    // working cookie the user lost.
+    expect(describeCookieWriteFailure(new Error("Failed to parse cookie"))).toBe("rejected");
+  });
+
+  it("does not depend on the cause being an Error", () => {
+    expect(describeCookieWriteFailure("Setting cookie failed")).toBe("rejected");
+    expect(describeCookieWriteFailure({ message: "bad URL for cookie" })).toBe("invalid_domain");
+    expect(describeCookieWriteFailure(undefined)).toBe("rejected");
   });
 });

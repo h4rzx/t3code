@@ -55,7 +55,15 @@ export type CookieSkipReason =
   | "decryption_failed"
   | "expired"
   | "invalid_domain"
-  | "empty_name";
+  | "empty_name"
+  /**
+   * Chromium refused the cookie for a reason other than its domain — most
+   * often a value carrying a character its cookie parser does not accept.
+   * Separate from `invalid_domain` because the two call for opposite
+   * responses: a domain skip means the row was never usable here, a rejection
+   * means a live cookie was dropped.
+   */
+  | "rejected";
 
 export type CookieMapping =
   | { readonly kind: "write"; readonly cookie: ElectronCookieWrite }
@@ -130,6 +138,28 @@ export function mapChromiumCookie(input: {
   };
 }
 
+/**
+ * Why Chromium refused a cookie, read back from the rejection it throws.
+ *
+ * Electron surfaces `cookies.set` failures as a bare `Error` with Chromium's
+ * message and nothing structured, so the message is all there is to go on. The
+ * distinction that matters is domain versus everything else: a domain failure
+ * means the row could never have applied here, while anything else means a
+ * usable cookie was dropped and the user is one silent step from a session
+ * that does not work.
+ */
+export function describeCookieWriteFailure(cause: unknown): "invalid_domain" | "rejected" {
+  const message =
+    cause instanceof Error
+      ? cause.message
+      : typeof cause === "string"
+        ? cause
+        : typeof cause === "object" && cause !== null && "message" in cause
+          ? String((cause as { readonly message: unknown }).message)
+          : "";
+  return /\b(domain|url|host)\b/i.test(message) ? "invalid_domain" : "rejected";
+}
+
 export interface CookieImportSummary {
   readonly imported: number;
   readonly skipped: Record<CookieSkipReason, number>;
@@ -143,6 +173,7 @@ export const emptyImportSummary = (): CookieImportSummary => ({
     expired: 0,
     invalid_domain: 0,
     empty_name: 0,
+    rejected: 0,
   },
 });
 

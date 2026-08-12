@@ -1007,6 +1007,12 @@ export const DesktopCookieImportSkippedSchema = Schema.Struct({
   expired: Schema.Int,
   invalid_domain: Schema.Int,
   empty_name: Schema.Int,
+  /**
+   * Chromium refused the cookie for a reason other than its domain. Counted
+   * apart because it is the only bucket that represents a working cookie the
+   * user lost, rather than one that was never applicable.
+   */
+  rejected: Schema.Int,
 });
 
 export const DesktopCookieImportResultSchema = Schema.Struct({

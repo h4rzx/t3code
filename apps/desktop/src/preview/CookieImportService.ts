@@ -47,6 +47,7 @@ import {
   emptyImportSummary,
   mapChromiumCookie,
   mappingFromCookie,
+  describeCookieWriteFailure,
   tallyMapping,
   type ChromiumCookieRow,
   type CookieImportSummary,
@@ -505,23 +506,38 @@ export const importCookiesIntoSession = Effect.fn("desktop.cookieImport.importIn
         summary = tallyMapping(summary, mapping);
         continue;
       }
-      // Electron rejects cookies whose domain/URL pair it considers invalid;
-      // count those as domain problems instead of failing the whole import.
-      // A cookie counts as imported if it landed in at least one session.
+      // A cookie counts as imported if it landed in at least one session; one
+      // rejection should not abandon the other few thousand.
       const writes = yield* Effect.all(
         input.sessions.map((target) =>
           Effect.tryPromise(() => target.cookies.set(mapping.cookie)).pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => false),
+            Effect.as(null),
+            // `tryPromise` wraps the rejection, and Chromium's reason lives in
+            // the original, so unwrap before classifying.
+            Effect.catch((error) => Effect.succeed(describeCookieWriteFailure(error.cause))),
           ),
         ),
         { concurrency: "unbounded" },
       );
-      const written = writes.some(Boolean);
-      summary = tallyMapping(
-        summary,
-        written ? mapping : { kind: "skip", reason: "invalid_domain" },
-      );
+      const written = writes.some((failure) => failure === null);
+      if (written) {
+        summary = tallyMapping(summary, mapping);
+        continue;
+      }
+      // Report why rather than filing every failure under the domain: a
+      // domain skip means the row was never usable in this session, while a
+      // rejected value means a live cookie was silently dropped, and the two
+      // point at completely different fixes.
+      const failure = writes.find((entry) => entry !== null) ?? "rejected";
+      yield* Effect.logDebug("Preview cookie import rejected a cookie", {
+        name: mapping.cookie.name,
+        domain: mapping.cookie.domain,
+        failure,
+      });
+      summary = tallyMapping(summary, {
+        kind: "skip",
+        reason: failure === "invalid_domain" ? "invalid_domain" : "rejected",
+      });
     }
     return summary;
   },

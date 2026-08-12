@@ -44,7 +44,9 @@ export function describeImportResult(result: DesktopCookieImportResult): string 
   if (skipped.device_bound > 0) reasons.push(`${skipped.device_bound} device-bound`);
   if (skipped.decryption_failed > 0) reasons.push(`${skipped.decryption_failed} unreadable`);
   if (skipped.expired > 0) reasons.push(`${skipped.expired} expired`);
-  if (skipped.invalid_domain > 0) reasons.push(`${skipped.invalid_domain} rejected`);
+  if (skipped.invalid_domain > 0) reasons.push(`${skipped.invalid_domain} not applicable`);
+  if (skipped.rejected > 0) reasons.push(`${skipped.rejected} rejected`);
+  if (skipped.empty_name > 0) reasons.push(`${skipped.empty_name} unnamed`);
 
   const skippedTotal = Object.values(skipped).reduce((sum, count) => sum + count, 0);
   const imported = `${result.imported.toLocaleString()} cookie${result.imported === 1 ? "" : "s"} imported.`;
