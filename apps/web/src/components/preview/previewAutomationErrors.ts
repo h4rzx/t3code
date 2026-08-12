@@ -10,6 +10,8 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
+import { desktopErrorTag } from "./desktopErrorTag";
+
 export interface PreviewAutomationOperationContext {
   readonly requestId: PreviewAutomationRequest["requestId"];
   readonly operation: PreviewAutomationRequest["operation"];
@@ -134,20 +136,74 @@ export class PreviewAutomationTargetNotEditableHostError extends Schema.TaggedEr
   }
 }
 
+/**
+ * The desktop rejects a selector when it matches nothing usable — most often a
+ * selector that resolved to a hidden responsive duplicate. Without this mapping
+ * the tag falls through to the generic operation error, and the caller is told
+ * only that the page "rejected the operation", which reads like a page problem
+ * rather than a selector problem.
+ */
+export class PreviewAutomationInvalidSelectorHostError extends Schema.TaggedErrorClass<PreviewAutomationInvalidSelectorHostError>()(
+  "PreviewAutomationInvalidSelectorHostError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: Schema.NullOr(PreviewTabId),
+    selectorKind: Schema.optional(Schema.Literals(["focused-element", "locator", "selector"])),
+    selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationInvalidSelectorError" as const;
+  }
+
+  override get message(): string {
+    return `Preview automation ${this.operation} request ${this.requestId} rejected the selector in tab ${this.tabId ?? "unassigned"}.`;
+  }
+}
+
+const selectorDiagnostics = (
+  cause: unknown,
+  tag: string,
+): {
+  readonly selectorKind?: "focused-element" | "locator" | "selector";
+  readonly selectorLength?: number;
+} | null => {
+  // Match on the recovered tag: an error that crossed Electron IPC has no
+  // `_tag` field left, so comparing it directly never matched and every typed
+  // failure fell through to the generic operation error.
+  if (desktopErrorTag(cause) !== tag) return null;
+  if (typeof cause !== "object" || cause === null) return {};
+  const selectorKind =
+    "selectorKind" in cause &&
+    (cause.selectorKind === "focused-element" ||
+      cause.selectorKind === "locator" ||
+      cause.selectorKind === "selector")
+      ? cause.selectorKind
+      : undefined;
+  const selectorLength =
+    "selectorLength" in cause &&
+    typeof cause.selectorLength === "number" &&
+    Number.isInteger(cause.selectorLength) &&
+    cause.selectorLength >= 0
+      ? cause.selectorLength
+      : undefined;
+  return {
+    ...(selectorKind === undefined ? {} : { selectorKind }),
+    ...(selectorLength === undefined ? {} : { selectorLength }),
+  };
+};
+
 const targetNotEditableDiagnostics = (
   cause: unknown,
 ): {
   readonly selectorKind?: "focused-element" | "locator" | "selector";
   readonly selectorLength?: number;
 } | null => {
-  if (
-    typeof cause !== "object" ||
-    cause === null ||
-    !("_tag" in cause) ||
-    cause._tag !== "PreviewAutomationTargetNotEditableError"
-  ) {
-    return null;
-  }
+  if (desktopErrorTag(cause) !== "PreviewAutomationTargetNotEditableError") return null;
+  if (typeof cause !== "object" || cause === null) return {};
   const selectorKind =
     "selectorKind" in cause &&
     (cause.selectorKind === "focused-element" ||
@@ -183,6 +239,20 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
     input: PreviewAutomationOperationContext & { readonly cause: unknown },
   ): PreviewAutomationHostError {
     if (isPreviewAutomationHostError(input.cause)) return input.cause;
+    const invalidSelector = selectorDiagnostics(
+      input.cause,
+      "PreviewAutomationInvalidSelectorError",
+    );
+    if (invalidSelector) {
+      return new PreviewAutomationInvalidSelectorHostError({
+        requestId: input.requestId,
+        operation: input.operation,
+        environmentId: input.environmentId,
+        threadId: input.threadId,
+        tabId: input.tabId,
+        ...invalidSelector,
+      });
+    }
     const diagnostics = targetNotEditableDiagnostics(input.cause);
     return diagnostics
       ? new PreviewAutomationTargetNotEditableHostError({
@@ -206,6 +276,7 @@ export class PreviewAutomationOperationError extends Schema.TaggedErrorClass<Pre
 }
 
 export const PreviewAutomationHostError = Schema.Union([
+  PreviewAutomationInvalidSelectorHostError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationViewportTimeoutError,
