@@ -4,6 +4,7 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/providers"
   | "/settings/source-control"
+  | "/settings/browser"
   | "/settings/connections"
   | "/settings/archived";
 
@@ -24,6 +25,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
   "/settings/source-control": "Source Control",
+  "/settings/browser": "Browser",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
 };
@@ -188,6 +190,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Remote environments",
     to: "/settings/connections",
+  },
+  {
+    id: "import-browser-cookies",
+    title: "Import browser cookies",
+    to: "/settings/browser",
+  },
+  {
+    id: "clear-browser-cookies",
+    title: "Clear preview browser data",
+    to: "/settings/browser",
   },
   {
     id: "archive",

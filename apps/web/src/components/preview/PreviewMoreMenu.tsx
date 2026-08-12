@@ -2,6 +2,7 @@
 
 import type { DesktopPreviewColorScheme } from "@t3tools/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 
 import { Button } from "~/components/ui/button";
 import {
@@ -67,6 +68,7 @@ export function PreviewMoreMenu({
   nativePictureInPicture,
   onNativePictureInPicture,
 }: Props) {
+  const navigate = useNavigate();
   if (!previewBridge) return null;
   const bridge = previewBridge;
   const tabDisabled = !tabId || !hasWebContents;
@@ -177,6 +179,15 @@ export function PreviewMoreMenu({
           </span>
         </MenuItem>
         <MenuSeparator />
+        {/*
+          Import routes to Settings rather than running here: it needs the
+          browser/profile picker and the native consent dialog, and copying a
+          live login is a decision that belongs on a settings screen, not one
+          click deep in a context menu.
+        */}
+        <MenuItem onClick={() => void navigate({ to: "/settings/browser" })}>
+          Import cookies…
+        </MenuItem>
         <MenuItem onClick={() => void bridge.clearCookies().catch(() => undefined)}>
           Clear cookies
         </MenuItem>

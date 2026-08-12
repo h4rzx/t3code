@@ -12,6 +12,7 @@ import {
   ArrowLeftIcon,
   BotIcon,
   GitBranchIcon,
+  GlobeIcon,
   KeyboardIcon,
   Link2Icon,
   PaletteIcon,
@@ -50,6 +51,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/keybindings": KeyboardIcon,
   "/settings/providers": BotIcon,
   "/settings/source-control": GitBranchIcon,
+  "/settings/browser": GlobeIcon,
   "/settings/connections": Link2Icon,
   "/settings/archived": ArchiveIcon,
 };
