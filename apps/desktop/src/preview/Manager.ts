@@ -106,6 +106,12 @@ const MAX_INTERACTIVE_ELEMENTS = 200;
 const MAX_SCREENSHOT_WIDTH = 1280;
 /** Bound on capturePage(), which never settles when the webview is not painted. */
 const SNAPSHOT_CAPTURE_TIMEOUT = "2 seconds";
+/**
+ * Deadline for the page image alone. A painted page answers in tens of
+ * milliseconds; a webview nothing renders never answers at all, so this is the
+ * cost of finding that out rather than the time a capture needs.
+ */
+const SCREENSHOT_CAPTURE_TIMEOUT = "750 millis";
 const RECORDING_FRAME_INTERVAL_MS = Math.ceil(1_000 / 12);
 const RECORDING_JPEG_QUALITY = 80;
 const PICTURE_IN_PICTURE_INITIAL_WIDTH = 480;
@@ -2627,24 +2633,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   });
 
   /**
-   * A base64 PNG of the page, or null when even a forced capture yields
-   * nothing.
+   * A base64 PNG of the page, or null when the page cannot be captured.
    *
-   * Chromium's compositor produces no frame for a webview that is not on
-   * screen, so a plain capture comes back empty for exactly the case
-   * background automation cares about — an agent driving a tab while the
-   * preview panel is closed. Overriding device metrics forces a resize and
-   * therefore a frame, whether or not the widget is visible.
+   * A webview nothing renders has no compositor surface, so Chromium never
+   * produces a frame for it and the capture simply never returns. This is not
+   * a limitation of the capture command — forcing device metrics does not
+   * help, and `Page.startScreencast` hangs the same way, both verified against
+   * a hidden tab. Capturing a background tab needs the webview attached to an
+   * offscreen window, which is a change to how preview tabs are created rather
+   * than anything this path can do.
    *
-   * Tried only as a fallback: the override is a real change to the page's
-   * view, and imposing it on a visible preview would make the panel flicker
-   * on every snapshot for no gain.
+   * Nor can it be predicted from here: an owning window exists and
+   * `document.visibilityState` still reads "visible" for a webview no panel
+   * has laid out, so neither answers the question that matters. What is left
+   * is to bound the wait. A painted page captures in tens of milliseconds, so
+   * a short deadline costs a visible preview nothing and stops a hidden one
+   * from spending seconds per snapshot on the path an agent drives in a loop.
    */
   const captureAutomationImage = Effect.fn("PreviewManager.captureAutomationImage")(function* (
-    tabId: string,
     send: SendCommand,
   ) {
-    const capture = send("Page.captureScreenshot", {
+    return yield* send("Page.captureScreenshot", {
       format: "png",
       captureBeyondViewport: false,
     }).pipe(
@@ -2654,40 +2663,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         // which would otherwise read as a successful capture of nothing.
         return typeof data === "string" && data.length > 0 ? data : null;
       }),
-      Effect.timeoutOption(SNAPSHOT_CAPTURE_TIMEOUT),
+      Effect.timeoutOption(SCREENSHOT_CAPTURE_TIMEOUT),
       Effect.map(Option.getOrNull),
       Effect.orElseSucceed(() => null),
     );
-
-    const direct = yield* capture;
-    if (direct !== null) return direct;
-
-    const metrics = yield* evaluateWithDebugger<{
-      readonly width: number;
-      readonly height: number;
-      readonly deviceScaleFactor: number;
-    } | null>(
-      tabId,
-      send,
-      `({ width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio })`,
-      true,
-    ).pipe(Effect.orElseSucceed(() => null));
-    if (metrics === null || metrics.width <= 0 || metrics.height <= 0) return null;
-
-    return yield* Effect.acquireUseRelease(
-      send("Emulation.setDeviceMetricsOverride", {
-        width: metrics.width,
-        height: metrics.height,
-        deviceScaleFactor: metrics.deviceScaleFactor,
-        mobile: false,
-      }),
-      () => capture,
-      () =>
-        // Always cleared: leaving an override in place pins the page to the
-        // size it had while hidden, so it would stop reflowing when the panel
-        // is reopened.
-        send("Emulation.clearDeviceMetricsOverride").pipe(Effect.ignore),
-    ).pipe(Effect.orElseSucceed(() => null));
   });
 
   /**
@@ -2821,7 +2800,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         captureAriaSnapshot(tabId, send),
         // Optional by design: an agent driving a hidden tab must still get the
         // element tree even when no image can be produced at all.
-        captureAutomationImage(tabId, send),
+        captureAutomationImage(send),
         Ref.get(diagnosticsRef),
         Ref.get(actionTimelineRef),
       ]);
