@@ -548,6 +548,16 @@ export const PreviewAutomationSnapshot = Schema.Struct({
    */
   visibleTextTotal: Schema.optional(Schema.Int),
   interactiveElementsTotal: Schema.optional(Schema.Int),
+  /**
+   * The page as an accessibility tree, in Playwright's aria-snapshot notation.
+   *
+   * `visibleText` flattens the page into prose: it takes thousands of
+   * characters to say what this says in a fraction, and it throws away the
+   * structure that would tell a caller a table is a table or a dialog is
+   * covering the page. Optional because a host that cannot inject Playwright
+   * still produces a usable snapshot without it.
+   */
+  ariaSnapshot: Schema.optional(Schema.String),
   accessibilityTree: Schema.Unknown,
   consoleEntries: Schema.Array(PreviewAutomationConsoleEntry),
   networkEntries: Schema.Array(PreviewAutomationNetworkEntry),

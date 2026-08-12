@@ -97,6 +97,11 @@ const DEFAULT_ZOOM_FACTOR = 1.0;
 const ZOOM_EPSILON = 0.001;
 const MAX_EVALUATION_BYTES = 64_000;
 const MAX_VISIBLE_TEXT_LENGTH = 20_000;
+/**
+ * The aria tree is far denser than the same page as text, so it needs less
+ * room to say more. Still capped: a generated page can nest without bound.
+ */
+const MAX_ARIA_SNAPSHOT_LENGTH = 12_000;
 const MAX_INTERACTIVE_ELEMENTS = 200;
 const MAX_SCREENSHOT_WIDTH = 1280;
 /** Bound on capturePage(), which never settles when the webview is not painted. */
@@ -2685,6 +2690,41 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     ).pipe(Effect.orElseSucceed(() => null));
   });
 
+  /**
+   * The page as an accessibility tree, or null when Playwright is unavailable.
+   *
+   * `autoexpect` mode renders the visible tree with no refs of its own, which
+   * matters because the snapshot already carries server-assigned refs and two
+   * competing ref schemes in one payload would be worse than none.
+   *
+   * Never fails the snapshot: a page that blocks injection, or a document with
+   * no body yet, should still yield elements and a screenshot.
+   */
+  const captureAriaSnapshot = Effect.fn("PreviewManager.captureAriaSnapshot")(function* (
+    tabId: string,
+    send: SendCommand,
+  ) {
+    return yield* ensurePlaywrightInjected(tabId, send).pipe(
+      Effect.andThen(() =>
+        evaluateWithDebugger<string | null>(
+          tabId,
+          send,
+          `(() => {
+            const injected = globalThis.__t3PlaywrightInjected;
+            const root = document.body || document.documentElement;
+            if (!injected || !root) return null;
+            const tree = injected.ariaSnapshot(root, { mode: "autoexpect" });
+            return typeof tree === "string" ? tree.slice(0, ${MAX_ARIA_SNAPSHOT_LENGTH}) : null;
+          })()`,
+          true,
+        ),
+      ),
+      Effect.timeoutOption(SNAPSHOT_CAPTURE_TIMEOUT),
+      Effect.map(Option.getOrNull),
+      Effect.orElseSucceed(() => null),
+    );
+  });
+
   const captureAutomationSnapshot = Effect.fn("PreviewManager.captureAutomationSnapshot")(
     function* (tabId: string, wc: Electron.WebContents, send: SendCommand) {
       // Page is needed for captureScreenshot; enabling it is cheap and lets the
@@ -2776,8 +2816,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         })()`,
         true,
       );
-      const [accessibility, sourceImage, diagnostics, timelines] = yield* Effect.all([
+      const [accessibility, ariaSnapshot, sourceImage, diagnostics, timelines] = yield* Effect.all([
         send("Accessibility.getFullAXTree"),
+        captureAriaSnapshot(tabId, send),
         // Optional by design: an agent driving a hidden tab must still get the
         // element tree even when no image can be produced at all.
         captureAutomationImage(tabId, send),
@@ -2797,6 +2838,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const browserDiagnostics = diagnostics.get(wc.id);
       return {
         ...page,
+        ...(ariaSnapshot === null ? {} : { ariaSnapshot }),
         accessibilityTree: accessibility,
         consoleEntries: [...(browserDiagnostics?.consoleEntries ?? [])],
         networkEntries: [...(browserDiagnostics?.networkEntries ?? [])],

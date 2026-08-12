@@ -266,3 +266,58 @@ describe("snapshot budgets", () => {
     expect(json.truncated).toBeUndefined();
   });
 });
+
+describe("projectSnapshotForCli aria snapshot", () => {
+  const base = {
+    url: "https://example.com/",
+    title: "Example",
+    loading: false,
+    interactiveElements: [],
+    accessibilityTree: {},
+    consoleEntries: [],
+    networkEntries: [],
+    actionTimeline: [],
+    screenshot: null,
+  };
+
+  const project = (snapshot: Record<string, unknown>) =>
+    projectSnapshotForCli(snapshot, {
+      screenshotPath: undefined,
+      includeScreenshotData: false,
+      includeAccessibilityTree: false,
+    }).json as Record<string, unknown>;
+
+  it("prefers the aria tree and drops the flattened text", () => {
+    // Emitting both would pay twice for two descriptions of the same page.
+    const json = project({
+      ...base,
+      visibleText: "Example Domain More information...",
+      ariaSnapshot: '- heading "Example Domain" [level=1]\n- link "More information"',
+    });
+    expect(json.ariaSnapshot).toContain("Example Domain");
+    expect(json.visibleText).toBeUndefined();
+  });
+
+  it("falls back to visible text when the host produced no tree", () => {
+    const json = project({ ...base, visibleText: "Example Domain" });
+    expect(json.visibleText).toBe("Example Domain");
+    expect(json.ariaSnapshot).toBeUndefined();
+  });
+
+  it("ignores an empty tree rather than reporting a blank page", () => {
+    const json = project({ ...base, visibleText: "Example Domain", ariaSnapshot: "" });
+    expect(json.visibleText).toBe("Example Domain");
+  });
+
+  it("does not borrow the host's text total for a tree it never measured", () => {
+    // visibleTextTotal describes visibleText. Applying it to the tree would
+    // report a truncation that never happened.
+    const json = project({
+      ...base,
+      visibleText: "short",
+      visibleTextTotal: 500_000,
+      ariaSnapshot: '- heading "Example"',
+    });
+    expect(json.truncated).toBeUndefined();
+  });
+});

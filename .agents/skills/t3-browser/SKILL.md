@@ -86,6 +86,22 @@ T3 browser snapshot                    # every element comes back with a ref: @e
 T3 browser click --element @e3         # act on what exists, do not invent a locator
 ```
 
+`snapshot` returns the page as an `ariaSnapshot` — an accessibility tree, not flattened
+text:
+
+```yaml
+- banner:
+    - heading "Projects" [level=1]
+    - button "New project"
+- main:
+    - table:
+        - row: ...
+```
+
+Read the structure, not just the words: a `dialog` at the top level means something is
+covering the page, and a `table` means `extract` will work on it. Hosts that cannot produce
+a tree fall back to `visibleText`, so handle either.
+
 ## Reading data: use `extract`, not `snapshot`
 
 `snapshot` is for orientation — where am I, what can I click. It is budgeted and

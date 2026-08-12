@@ -227,7 +227,8 @@ export function projectSnapshotForCli(
     return { json: { result }, screenshotBase64: null };
   }
   const snapshot = result as PreviewAutomationSnapshot;
-  const { screenshot, accessibilityTree, visibleText, interactiveElements, ...rest } = snapshot;
+  const { screenshot, accessibilityTree, visibleText, ariaSnapshot, interactiveElements, ...rest } =
+    snapshot;
   const wantsData = options.includeScreenshotData;
   const full = options.full === true;
   const textBudget = options.maxTextChars ?? DEFAULT_SNAPSHOT_TEXT_BUDGET;
@@ -235,7 +236,14 @@ export function projectSnapshotForCli(
   const allElements = interactiveElements ?? [];
   const rankedElements = full ? allElements : rankInteractiveElements(allElements);
   const keptElements = full ? allElements : rankedElements.slice(0, elementBudget);
-  const text = visibleText ?? "";
+  // Prefer the aria tree. It carries the page's structure — this is a table,
+  // that is a dialog over the top of it — in a fraction of the characters the
+  // same page costs as flattened text, and structure is what a caller actually
+  // reasons about. `visibleText` stays as the fallback for hosts that cannot
+  // produce one, and is dropped when the tree is present so the two
+  // representations of the same page are never paid for twice.
+  const aria = typeof ariaSnapshot === "string" && ariaSnapshot.length > 0 ? ariaSnapshot : null;
+  const text = aria ?? visibleText ?? "";
   const keptText = full || text.length <= textBudget ? text : text.slice(0, textBudget);
   // Say what was dropped: a silently truncated page reads as a complete one.
   // Totals come from the page when the host reports them, because the host
@@ -246,11 +254,19 @@ export function projectSnapshotForCli(
     readonly visibleTextTotal?: number;
     readonly interactiveElementsTotal?: number;
   };
-  const textTotal = Math.max(hostSnapshot.visibleTextTotal ?? 0, text.length);
+  // The host's text total describes `visibleText`, so it says nothing about a
+  // tree that was never flattened.
+  const textTotal =
+    aria === null ? Math.max(hostSnapshot.visibleTextTotal ?? 0, text.length) : text.length;
   const elementsTotal = Math.max(hostSnapshot.interactiveElementsTotal ?? 0, allElements.length);
   const truncated = {
     ...(keptText.length < textTotal
-      ? { visibleTextChars: { kept: keptText.length, total: textTotal } }
+      ? {
+          [aria === null ? "visibleTextChars" : "ariaSnapshotChars"]: {
+            kept: keptText.length,
+            total: textTotal,
+          },
+        }
       : {}),
     ...(keptElements.length < elementsTotal
       ? { interactiveElements: { kept: keptElements.length, total: elementsTotal } }
@@ -259,7 +275,7 @@ export function projectSnapshotForCli(
   return {
     json: {
       ...rest,
-      visibleText: keptText,
+      ...(aria === null ? { visibleText: keptText } : { ariaSnapshot: keptText }),
       interactiveElements: keptElements,
       ...(Object.keys(truncated).length > 0
         ? {
