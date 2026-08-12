@@ -44,7 +44,28 @@ export interface ExtractOptions {
    * the only way to read them is to name each part.
    */
   readonly fields?: ReadonlyArray<{ readonly name: string; readonly selector: string }> | undefined;
+  /**
+   * Scroll the list and accumulate rows instead of reading the DOM once.
+   * Only for virtualized lists — it is slower, and on an ordinary list it
+   * cannot find anything a single read did not already have.
+   */
+  readonly scroll?: boolean | undefined;
+  /**
+   * Element to scroll. Defaults to the nearest scrollable ancestor of the
+   * first match, then the window.
+   */
+  readonly scrollContainer?: string | undefined;
+  /** Ceiling on scroll passes, so a list that never settles still returns. */
+  readonly maxScrolls?: number | undefined;
 }
+
+/** Scroll passes before giving up on a list that keeps producing rows. */
+export const DEFAULT_MAX_SCROLLS = 40;
+export const MAX_SCROLLS_CEILING = 200;
+/** Passes with no new rows before the list counts as exhausted. */
+const STABLE_PASSES_REQUIRED = 2;
+/** Time for a virtualized list to render after a scroll, per pass. */
+const SCROLL_SETTLE_MS = 120;
 
 /** Parses `name:selector,other:selector` into field pairs. */
 export function parseFieldSpec(
@@ -87,6 +108,15 @@ export interface ExtractResult {
   readonly rows: ReadonlyArray<ExtractRow>;
   /** Present when more rows exist; pass it as --offset to continue. */
   readonly nextOffset?: number;
+  /** Set when rows were gathered by scrolling rather than one DOM read. */
+  readonly scrolled?: boolean;
+  /**
+   * False when the scroll cap was reached with rows still arriving, so
+   * `total` is a floor rather than a count. Silence here would read as a
+   * complete answer.
+   */
+  readonly complete?: boolean;
+  readonly scrollPasses?: number;
 }
 
 export function normalizeExtractOptions(options: ExtractOptions): {
@@ -129,17 +159,30 @@ const raise = (detail: string): never => {
  * never depends on how many rows happened to come back.
  */
 export function buildExtractExpression(options: ExtractOptions): string {
-  const { selector, offset, limit, cellSelector, attributes } = normalizeExtractOptions(options);
+  if (options.scroll === true) return buildScrollingExtractExpression(options);
+  const { selector, offset, limit } = normalizeExtractOptions(options);
   const json = (value: string) => JSON.stringify(value);
   return `(() => {
+  ${rowBuilderSource(options)}
   const matches = Array.from(document.querySelectorAll(${json(selector)}));
   const total = matches.length;
-  const slice = matches.slice(${offset}, ${offset + limit});
-  const clean = (value) => (value || "").replace(/\\s+/g, " ").trim().slice(0, ${MAX_CELL_CHARS});
+  const rows = matches.slice(${offset}, ${offset + limit}).map((element, position) => buildRow(element, ${offset} + position));
+  return { selector: ${json(selector)}, total, offset: ${offset}, limit: ${limit}, rows };
+})()`;
+}
+
+/**
+ * The page-side `buildRow(element, index)` both extraction paths share, so a
+ * row read by scrolling is shaped identically to one read in place.
+ */
+function rowBuilderSource(options: ExtractOptions): string {
+  const { cellSelector, attributes } = normalizeExtractOptions(options);
+  const json = (value: string) => JSON.stringify(value);
+  return `const clean = (value) => (value || "").replace(/\\s+/g, " ").trim().slice(0, ${MAX_CELL_CHARS});
   const fieldSpec = ${JSON.stringify(options.fields ?? [])};
-  const rows = slice.map((element, position) => {
+  const buildRow = (element, index) => {
     const cells = Array.from(element.querySelectorAll(${json(cellSelector)})).map((cell) => clean(cell.innerText));
-    const row = { index: ${offset} + position, text: clean(element.innerText) };
+    const row = { index, text: clean(element.innerText) };
     if (cells.length > 0) row.cells = cells;
     if (fieldSpec.length > 0) {
       const fields = {};
@@ -160,8 +203,90 @@ export function buildExtractExpression(options: ExtractOptions): string {
         : ""
     }
     return row;
-  });
-  return { selector: ${json(selector)}, total, offset: ${offset}, limit: ${limit}, rows };
+  };`;
+}
+
+/**
+ * The virtualized-list path: scroll, collect, repeat.
+ *
+ * react-window and its kin keep only the visible window in the DOM, so a
+ * single read returns whatever happened to be on screen and says `total: 12`
+ * for a list of nine hundred. That is worse than failing, because it looks
+ * like an answer.
+ *
+ * Rows are deduplicated by content rather than by element, because a
+ * virtualized list recycles its nodes — the same `<div>` is row 3, then row
+ * 40. Content is the only identity that survives, and first-seen order is
+ * kept so the result still reads top to bottom.
+ *
+ * The whole loop runs in one evaluation. Driving it from the CLI would mean a
+ * round trip per scroll, and the list would keep rendering between them.
+ */
+export function buildScrollingExtractExpression(options: ExtractOptions): string {
+  const { selector, offset, limit } = normalizeExtractOptions(options);
+  const maxScrolls = options.maxScrolls ?? DEFAULT_MAX_SCROLLS;
+  if (!Number.isInteger(maxScrolls) || maxScrolls <= 0 || maxScrolls > MAX_SCROLLS_CEILING) {
+    return raise(`--max-scrolls must be between 1 and ${MAX_SCROLLS_CEILING}.`);
+  }
+  const json = (value: string) => JSON.stringify(value);
+  const container = options.scrollContainer?.trim();
+  return `(async () => {
+  ${rowBuilderSource(options)}
+  const settle = () => new Promise((resolve) => setTimeout(() => requestAnimationFrame(() => resolve()), ${SCROLL_SETTLE_MS}));
+  const scrollableAncestor = (element) => {
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      const scrolls = /auto|scroll|overlay/.test(style.overflowY);
+      if (scrolls && node.scrollHeight > node.clientHeight + 1) return node;
+    }
+    return null;
+  };
+  const first = document.querySelector(${json(selector)});
+  const container = ${container ? `document.querySelector(${json(container)})` : "null"} || (first ? scrollableAncestor(first) : null);
+  const scrollBy = (amount) => {
+    if (container) container.scrollTop += amount;
+    else window.scrollBy(0, amount);
+  };
+  const viewport = () => (container ? container.clientHeight : window.innerHeight);
+
+  const seen = new Map();
+  const collect = () => {
+    for (const element of document.querySelectorAll(${json(selector)})) {
+      const row = buildRow(element, 0);
+      // Cells join the key so two rows that share a truncated text but differ
+      // in their columns are not collapsed into one.
+      const key = row.text + "\\u0000" + (row.cells || []).join("\\u0000");
+      if (key.length > 1 && !seen.has(key)) seen.set(key, row);
+    }
+  };
+
+  // Start from the top: a list already scrolled halfway would otherwise lose
+  // everything above the current position.
+  if (container) container.scrollTop = 0; else window.scrollTo(0, 0);
+  await settle();
+  collect();
+
+  let passes = 0;
+  let stable = 0;
+  let complete = true;
+  while (stable < ${STABLE_PASSES_REQUIRED}) {
+    if (passes >= ${maxScrolls}) { complete = false; break; }
+    const before = seen.size;
+    // Overlap by a fraction of the viewport so a row straddling the fold is
+    // never skipped between passes.
+    scrollBy(Math.max(1, Math.floor(viewport() * 0.8)));
+    await settle();
+    collect();
+    passes += 1;
+    // Two quiet passes rather than one: a list that renders lazily can answer
+    // a single scroll with nothing and still have more below.
+    stable = seen.size === before ? stable + 1 : 0;
+  }
+
+  const all = Array.from(seen.values());
+  const total = all.length;
+  const rows = all.slice(${offset}, ${offset + limit}).map((row, position) => ({ ...row, index: ${offset} + position }));
+  return { selector: ${json(selector)}, total, offset: ${offset}, limit: ${limit}, rows, scrolled: true, complete, scrollPasses: passes };
 })()`;
 }
 

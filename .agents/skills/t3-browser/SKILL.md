@@ -132,7 +132,17 @@ T3 browser eval "JSON.stringify({tables:document.querySelectorAll('table').lengt
 ```
 
 Scrolling is only required for virtualized lists, where rows genuinely do not exist in the
-DOM until rendered. Reach for it after `extract` comes back short, not before.
+DOM until rendered. Reach for it after `extract` comes back short, not before — on an
+ordinary list it is slower and cannot find anything the direct read missed.
+
+```bash
+T3 browser extract ".list-row" --scroll                            # scroll and accumulate
+T3 browser extract ".list-row" --scroll --scroll-container ".body" # when the container is not inferred
+```
+
+Rows are deduplicated by content, since a virtualized list recycles its DOM nodes. Check
+`complete` in the result: `false` means the scroll cap was hit with rows still arriving, so
+`total` is a floor rather than a count. Raise `--max-scrolls` or narrow the selector.
 
 **Always snapshot before acting.** Each `interactiveElements` entry carries a `ref`, and
 `--element @e3` is the reliable way to target it. Writing a locator from memory

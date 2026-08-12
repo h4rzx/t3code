@@ -48,7 +48,9 @@ import {
 import {
   buildExtractExpression,
   DEFAULT_EXTRACT_LIMIT,
+  DEFAULT_MAX_SCROLLS,
   MAX_EXTRACT_LIMIT,
+  MAX_SCROLLS_CEILING,
   parseFieldSpec,
 } from "./extractRequest.ts";
 import { type CliAuthLocationFlags, projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
@@ -673,6 +675,22 @@ const extractCommand = Command.make("extract", {
     ),
     Flag.optional,
   ),
+  scroll: Flag.boolean("scroll").pipe(
+    Flag.withDescription(
+      "Scroll and accumulate rows. Only for virtualized lists, where rows do not exist in the DOM until rendered.",
+    ),
+    Flag.withDefault(false),
+  ),
+  scrollContainer: Flag.string("scroll-container").pipe(
+    Flag.withDescription(
+      "Element to scroll with --scroll. Defaults to the nearest scrollable ancestor of the first row.",
+    ),
+    Flag.optional,
+  ),
+  maxScrolls: Flag.integer("max-scrolls").pipe(
+    Flag.withDescription(`Scroll passes before giving up (max ${MAX_SCROLLS_CEILING}).`),
+    Flag.withDefault(DEFAULT_MAX_SCROLLS),
+  ),
 }).pipe(
   Command.withDescription(
     "Read structured rows from the page in one call. Queries the DOM directly, so it sees every match regardless of scroll position.",
@@ -685,6 +703,11 @@ const extractCommand = Command.make("extract", {
         limit: flags.limit,
         cellSelector: Option.getOrUndefined(flags.cells),
         attributes: flags.attributes,
+        scroll: flags.scroll,
+        maxScrolls: flags.maxScrolls,
+        ...(Option.isSome(flags.scrollContainer)
+          ? { scrollContainer: flags.scrollContainer.value }
+          : {}),
         ...(Option.isSome(flags.fields) ? { fields: parseFieldSpec(flags.fields.value) } : {}),
       }),
     })),

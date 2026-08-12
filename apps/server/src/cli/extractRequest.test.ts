@@ -3,10 +3,13 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildExtractExpression,
   DEFAULT_EXTRACT_LIMIT,
+  ExtractInputError,
   MAX_EXTRACT_LIMIT,
+  MAX_SCROLLS_CEILING,
   parseFieldSpec,
   normalizeExtractOptions,
   withNextOffset,
+  type ExtractOptions,
   type ExtractResult,
 } from "./extractRequest.ts";
 
@@ -177,5 +180,52 @@ describe("extract with named fields", () => {
     expect(result.total).toBe(2);
     expect(result.rows[0]?.fields).toEqual({ name: "web-app", status: "Ready", missing: null });
     expect(result.rows[1]?.fields).toEqual({ name: "api", status: "Building", missing: null });
+  });
+});
+
+describe("buildScrollingExtractExpression", () => {
+  const expression = (options: Partial<ExtractOptions> = {}) =>
+    buildExtractExpression({ selector: ".row", scroll: true, ...options });
+
+  it("deduplicates by content, because a virtualized list recycles its nodes", () => {
+    // Keying on the element would collapse the whole list into one window's
+    // worth of rows: the same node is row 3, then row 40.
+    const source = expression();
+    expect(source).toContain("seen.has(key)");
+    expect(source).toContain('row.text + "\\u0000"');
+  });
+
+  it("starts from the top so a half-scrolled list does not lose its head", () => {
+    expect(expression()).toContain("container.scrollTop = 0");
+  });
+
+  it("reports incompleteness rather than passing a capped read off as a count", () => {
+    const source = expression({ maxScrolls: 3 });
+    expect(source).toContain("passes >= 3");
+    expect(source).toContain("complete = false");
+    expect(source).toContain("scrolled: true");
+  });
+
+  it("prefers an explicit container over the inferred one", () => {
+    expect(expression({ scrollContainer: ".list-body" })).toContain(
+      'document.querySelector(".list-body")',
+    );
+  });
+
+  it("rejects a scroll cap that would let the page run away", () => {
+    expect(() => expression({ maxScrolls: 0 })).toThrow(ExtractInputError);
+    expect(() => expression({ maxScrolls: MAX_SCROLLS_CEILING + 1 })).toThrow(ExtractInputError);
+  });
+
+  it("builds rows the same way the non-scrolling path does", () => {
+    // A row read by scrolling must be shaped identically, or a caller has to
+    // branch on how the data happened to be gathered.
+    const scrolled = expression({ fields: [{ name: "title", selector: "h3" }] });
+    const direct = buildExtractExpression({
+      selector: ".row",
+      fields: [{ name: "title", selector: "h3" }],
+    });
+    expect(scrolled).toContain('{"name":"title","selector":"h3"}');
+    expect(direct).toContain('{"name":"title","selector":"h3"}');
   });
 });
