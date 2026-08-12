@@ -157,7 +157,7 @@ interface RawCookieRow extends ChromiumCookieRow {
   readonly value: string;
 }
 
-const readCookieRows = (databasePath: string): ReadonlyArray<RawCookieRow> => {
+export const readCookieRows = (databasePath: string): ReadonlyArray<RawCookieRow> => {
   const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
   try {
     // expires_utc is microseconds since 1601 and overflows a JS number for any
