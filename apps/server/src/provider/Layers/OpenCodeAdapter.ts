@@ -28,6 +28,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { providerSessionEnvironment, resolveT3CliCommand } from "../sessionEnvironment.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
@@ -1207,7 +1208,14 @@ export function makeOpenCodeAdapter(
               const server = yield* openCodeRuntime.connectToOpenCodeServer({
                 binaryPath,
                 serverUrl,
-                ...(options?.environment ? { environment: options.environment } : {}),
+                environment: {
+                  ...(options?.environment ?? process.env),
+                  ...providerSessionEnvironment({
+                    threadId: input.threadId,
+                    baseDir: serverConfig.baseDir,
+                    cliCommand: yield* resolveT3CliCommand,
+                  }),
+                },
               });
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,

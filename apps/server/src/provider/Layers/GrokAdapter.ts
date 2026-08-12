@@ -34,6 +34,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { providerSessionEnvironment, resolveT3CliCommand } from "../sessionEnvironment.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   ProviderAdapterProcessError,
@@ -572,7 +573,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeGrokAcpRuntime({
             grokSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: {
+              ...(options?.environment ?? process.env),
+              ...providerSessionEnvironment({
+                threadId: input.threadId,
+                baseDir: serverConfig.baseDir,
+                cliCommand: yield* resolveT3CliCommand,
+              }),
+            },
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
