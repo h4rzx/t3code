@@ -41,6 +41,7 @@ import {
   setTheme,
   showContextMenu,
 } from "./methods/window.ts";
+import * as CookieImportIpc from "./methods/cookieImport.ts";
 import * as PreviewIpc from "./methods/preview.ts";
 import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
 
@@ -91,4 +92,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
   }
+  // Registered individually rather than in a loop: these two methods need
+  // different services, and iterating widens the requirements to `unknown`.
+  yield* ipc.handle(CookieImportIpc.listSources);
+  yield* ipc.handle(CookieImportIpc.run);
 });

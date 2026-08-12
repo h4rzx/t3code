@@ -945,6 +945,78 @@ export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
 });
 
+/**
+ * Cookie import: copying a signed-in session out of an installed browser into
+ * the preview browser, so previews can reach pages behind a login.
+ *
+ * This is deliberately shaped as a human-only surface. Reading another
+ * browser's cookie jar is a credential-scale action, so it is reachable from
+ * Settings, gated on a native confirmation in the main process, and is never
+ * exposed to agents through MCP or the CLI.
+ */
+export const DesktopCookieImportBrowserIdSchema = Schema.Literals([
+  "chrome",
+  "edge",
+  "brave",
+  "arc",
+  "comet",
+  "helium",
+  // Neither is Chromium: Safari is a binary jar, Firefox a plain SQLite file,
+  // and neither is encrypted, so both skip the Keychain step entirely.
+  "safari",
+  "firefox",
+]);
+export type DesktopCookieImportBrowserId = typeof DesktopCookieImportBrowserIdSchema.Type;
+
+export const DesktopCookieImportProfileSchema = Schema.Struct({
+  /** On-disk profile directory ("Default", "Profile 1", …). */
+  directory: Schema.String,
+  /** The profile's name as the source browser shows it, when it has one. */
+  displayName: Schema.String,
+});
+export type DesktopCookieImportProfile = typeof DesktopCookieImportProfileSchema.Type;
+
+export const DesktopCookieImportSourceSchema = Schema.Struct({
+  browserId: DesktopCookieImportBrowserIdSchema,
+  label: Schema.String,
+  /** Empty when the browser is installed but has no readable cookie store. */
+  profiles: Schema.Array(DesktopCookieImportProfileSchema),
+});
+export type DesktopCookieImportSource = typeof DesktopCookieImportSourceSchema.Type;
+
+export const DesktopCookieImportSourcesSchema = Schema.Struct({
+  /** False on platforms where we cannot resolve a decryption key (Windows). */
+  supported: Schema.Boolean,
+  sources: Schema.Array(DesktopCookieImportSourceSchema),
+});
+export type DesktopCookieImportSources = typeof DesktopCookieImportSourcesSchema.Type;
+
+export const DesktopCookieImportInputSchema = Schema.Struct({
+  browserId: DesktopCookieImportBrowserIdSchema,
+  profileDirectory: Schema.String,
+  /**
+   * Preview sessions are partitioned per environment, so an import has to name
+   * the environments it should land in. Empty means the default partition.
+   */
+  environmentIds: Schema.Array(EnvironmentId),
+});
+
+export const DesktopCookieImportSkippedSchema = Schema.Struct({
+  device_bound: Schema.Int,
+  decryption_failed: Schema.Int,
+  expired: Schema.Int,
+  invalid_domain: Schema.Int,
+  empty_name: Schema.Int,
+});
+
+export const DesktopCookieImportResultSchema = Schema.Struct({
+  /** "cancelled" when the user declined the confirmation dialog. */
+  status: Schema.Literals(["imported", "cancelled"]),
+  imported: Schema.Int,
+  skipped: DesktopCookieImportSkippedSchema,
+});
+export type DesktopCookieImportResult = typeof DesktopCookieImportResultSchema.Type;
+
 export const DesktopPreviewSetColorSchemeInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   colorScheme: DesktopPreviewColorSchemeSchema,
@@ -1086,6 +1158,19 @@ export interface DesktopPreviewBridge {
   openDevTools: (tabId: string) => Promise<void>;
   /** Drop cookies + storage data for the preview partition (all tabs). */
   clearCookies: () => Promise<void>;
+  /**
+   * Import a signed-in session from an installed browser. Settings-only: the
+   * main process shows a native confirmation before reading anything, and
+   * agents have no path to these calls.
+   */
+  cookieImport: {
+    listSources: () => Promise<DesktopCookieImportSources>;
+    run: (input: {
+      browserId: DesktopCookieImportBrowserId;
+      profileDirectory: string;
+      environmentIds: ReadonlyArray<EnvironmentId>;
+    }) => Promise<DesktopCookieImportResult>;
+  };
   /** Drop the HTTP cache for the preview partition (all tabs). */
   clearCache: () => Promise<void>;
   /**
