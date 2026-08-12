@@ -64,8 +64,22 @@ export const DEFAULT_MAX_SCROLLS = 40;
 export const MAX_SCROLLS_CEILING = 200;
 /** Passes with no new rows before the list counts as exhausted. */
 const STABLE_PASSES_REQUIRED = 2;
-/** Time for a virtualized list to render after a scroll, per pass. */
-const SCROLL_SETTLE_MS = 120;
+/**
+ * How long to wait for a list to re-render after a scroll before giving up on
+ * that pass. Generous because a preview nothing is compositing dispatches its
+ * scroll event lazily — hundreds of milliseconds, where a visible page takes
+ * one frame. A fixed sleep tuned for the visible case reads a stale DOM on the
+ * hidden one and calls the result complete.
+ */
+const SCROLL_SETTLE_TIMEOUT_MS = 1200;
+/** Poll interval while waiting, so a fast page is not held to the deadline. */
+const SCROLL_POLL_MS = 40;
+/**
+ * Total in-page budget. The evaluate operation times out at 15s, and a loop
+ * killed by that timeout returns nothing at all — worse than a short read that
+ * says it is short.
+ */
+const SCROLL_BUDGET_MS = 12_000;
 
 /** Parses `name:selector,other:selector` into field pairs. */
 export function parseFieldSpec(
@@ -232,7 +246,31 @@ export function buildScrollingExtractExpression(options: ExtractOptions): string
   const container = options.scrollContainer?.trim();
   return `(async () => {
   ${rowBuilderSource(options)}
-  const settle = () => new Promise((resolve) => setTimeout(() => requestAnimationFrame(() => resolve()), ${SCROLL_SETTLE_MS}));
+  // Timers only. requestAnimationFrame never fires while the page is not being
+  // composited — the ordinary case here — so waiting on a frame hangs the loop
+  // until the operation times out.
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // What the rendered window looks like right now. Count alone is not enough:
+  // a virtualized list keeps the same number of rows and swaps their contents.
+  const signature = () => {
+    const nodes = document.querySelectorAll(${json(selector)});
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    // textContent, not innerText: this only has to notice a change, and
+    // innerText forces a layout pass that costs most of a second on a page
+    // Chromium is not compositing.
+    return nodes.length + "|" + (first ? first.textContent : "") + "|" + (last ? last.textContent : "");
+  };
+  // Waits for the list to actually re-render rather than for a fixed delay, so
+  // a visible page costs one poll and a hidden one still gets read correctly.
+  const settle = async (previous) => {
+    const deadline = Date.now() + ${SCROLL_SETTLE_TIMEOUT_MS};
+    while (Date.now() < deadline) {
+      await sleep(${SCROLL_POLL_MS});
+      if (signature() !== previous) return true;
+    }
+    return false;
+  };
   const scrollableAncestor = (element) => {
     for (let node = element; node; node = node.parentElement) {
       const style = getComputedStyle(node);
@@ -246,6 +284,16 @@ export function buildScrollingExtractExpression(options: ExtractOptions): string
   const scrollBy = (amount) => {
     if (container) container.scrollTop += amount;
     else window.scrollBy(0, amount);
+    // Dispatch the event ourselves. Setting scrollTop schedules a scroll event
+    // through the frame lifecycle, which does not run while the page is not
+    // being composited — so on a preview nothing renders, the list's own
+    // handler may not see the scroll for seconds, or at all. Virtualized lists
+    // re-render from that handler, so without this the loop scrolls a list
+    // that never redraws and reports the first window as the whole thing.
+    const event = new Event("scroll", { bubbles: false });
+    if (container) container.dispatchEvent(event);
+    else window.dispatchEvent(event);
+    document.dispatchEvent(new Event("scroll", { bubbles: false }));
   };
   const viewport = () => (container ? container.clientHeight : window.innerHeight);
 
@@ -263,20 +311,32 @@ export function buildScrollingExtractExpression(options: ExtractOptions): string
   // Start from the top: a list already scrolled halfway would otherwise lose
   // everything above the current position.
   if (container) container.scrollTop = 0; else window.scrollTo(0, 0);
-  await settle();
   collect();
+
+  const startedAt = Date.now();
 
   let passes = 0;
   let stable = 0;
   let complete = true;
   while (stable < ${STABLE_PASSES_REQUIRED}) {
-    if (passes >= ${maxScrolls}) { complete = false; break; }
+    if (passes >= ${maxScrolls} || Date.now() - startedAt > ${SCROLL_BUDGET_MS}) {
+      complete = false;
+      break;
+    }
     const before = seen.size;
+    const rendered = signature();
     // Overlap by a fraction of the viewport so a row straddling the fold is
     // never skipped between passes.
     scrollBy(Math.max(1, Math.floor(viewport() * 0.8)));
-    await settle();
+    // Collect before waiting. The scroll handler dispatched above runs
+    // synchronously, so a list that renders from it is already up to date —
+    // and sleeping first would pay the throttled timer on every pass for
+    // nothing. Only a list that renders asynchronously needs the wait.
     collect();
+    if (signature() === rendered) {
+      await settle(rendered);
+      collect();
+    }
     passes += 1;
     // Two quiet passes rather than one: a list that renders lazily can answer
     // a single scroll with nothing and still have more below.

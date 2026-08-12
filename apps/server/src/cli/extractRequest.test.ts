@@ -229,3 +229,14 @@ describe("buildScrollingExtractExpression", () => {
     expect(direct).toContain('{"name":"title","selector":"h3"}');
   });
 });
+
+describe("scroll settling", () => {
+  it("waits on a timer, not an animation frame", () => {
+    // requestAnimationFrame never fires on a page Chromium is not compositing,
+    // which is the ordinary case for background automation: waiting on a frame
+    // hung the loop until the operation timed out.
+    const source = buildExtractExpression({ selector: ".row", scroll: true });
+    expect(source).not.toContain("requestAnimationFrame(");
+    expect(source).toContain("setTimeout(resolve,");
+  });
+});
