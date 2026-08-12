@@ -1579,6 +1579,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     ) {
       return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
     }
+    // Chromium throttles timers hard in a page it is not compositing — a 40ms
+    // setTimeout comes back after ~700ms — and every preview an agent drives
+    // in the background is exactly that page. Anything the page does on a
+    // timer then runs at a fraction of its intended rate: a virtualized list
+    // re-renders a second after the scroll that asked for it, and automation
+    // reads the DOM as it was. Measured directly against a hidden tab.
+    yield* attempt(
+      { operation: "registerWebview.disableBackgroundThrottling", tabId, webContentsId },
+      () => wc.setBackgroundThrottling(false),
+    ).pipe(Effect.ignore);
     const attached = yield* Ref.get(attachedRef);
     const annotationTheme = yield* Ref.get(annotationThemeRef);
     if (tab.webContentsId === webContentsId && attached.has(webContentsId)) {
