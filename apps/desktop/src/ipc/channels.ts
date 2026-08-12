@@ -56,6 +56,8 @@ export const PREVIEW_CLEAR_COOKIES_CHANNEL = "desktop:preview-clear-cookies";
 export const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
 export const PREVIEW_COOKIE_IMPORT_LIST_CHANNEL = "desktop:preview-cookie-import-list";
 export const PREVIEW_COOKIE_IMPORT_RUN_CHANNEL = "desktop:preview-cookie-import-run";
+export const PREVIEW_COOKIE_IMPORT_OPEN_SETTINGS_CHANNEL =
+  "desktop:preview-cookie-import-open-settings";
 export const PREVIEW_GET_CONFIG_CHANNEL = "desktop:preview-get-config";
 export const PREVIEW_SET_ANNOTATION_THEME_CHANNEL = "desktop:preview-set-annotation-theme";
 export const PREVIEW_PICK_ELEMENT_CHANNEL = "desktop:preview-pick-element";

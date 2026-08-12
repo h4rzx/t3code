@@ -1181,6 +1181,11 @@ export interface DesktopPreviewBridge {
    */
   cookieImport: {
     listSources: () => Promise<DesktopCookieImportSources>;
+    /**
+     * Opens the OS settings pane that grants the missing permission. Takes no
+     * URL: the renderer names nothing, so nothing it sends can become one.
+     */
+    openPermissionSettings: () => Promise<boolean>;
     run: (input: {
       browserId: DesktopCookieImportBrowserId;
       profileDirectory: string;

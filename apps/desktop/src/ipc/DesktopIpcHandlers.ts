@@ -96,4 +96,5 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   // different services, and iterating widens the requirements to `unknown`.
   yield* ipc.handle(CookieImportIpc.listSources);
   yield* ipc.handle(CookieImportIpc.run);
+  yield* ipc.handle(CookieImportIpc.openPermissionSettings);
 });

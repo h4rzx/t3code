@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DesktopCookieImportSources } from "@t3tools/contracts";
 
 import { desktopErrorMessage } from "../preview/desktopErrorTag";
-import { readLocalApi } from "~/localApi";
 import { previewBridge } from "../preview/previewBridge";
 import { useProjects } from "~/state/entities";
 import { Button } from "../ui/button";
@@ -11,20 +10,6 @@ import { Spinner } from "../ui/spinner";
 import { describeImportResult, toChoices } from "./BrowserSettings.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
-
-/**
- * The Full Disk Access pane, addressed directly.
- *
- * macOS exposes individual privacy panes as URLs, so the user lands on the
- * list they need to change rather than at the top of System Settings with a
- * sentence to follow. `Privacy_AllFiles` is the Full Disk Access anchor.
- */
-const FULL_DISK_ACCESS_SETTINGS_URL =
-  "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
-
-const openFullDiskAccessSettings = () => {
-  void readLocalApi()?.shell.openExternal(FULL_DISK_ACCESS_SETTINGS_URL);
-};
 
 export function BrowserSettingsPanel() {
   const bridge = previewBridge;
@@ -113,6 +98,21 @@ export function BrowserSettingsPanel() {
     }
   }, [bridge]);
 
+  const handleOpenSettings = useCallback(async () => {
+    if (!bridge) return;
+    // Report a refusal rather than swallowing it: a button that silently does
+    // nothing reads as a broken app, and the user has no other way to tell
+    // that the pane did not open.
+    const opened = await bridge.cookieImport.openPermissionSettings().catch(() => false);
+    if (!opened) {
+      setStatus({
+        tone: "error",
+        message:
+          "Could not open System Settings. Open it yourself and enable T3 Code under Privacy & Security → Full Disk Access.",
+      });
+    }
+  }, [bridge]);
+
   const importDescription = !bridge
     ? "Cookie import is only available in the T3 Code desktop app."
     : sources !== null && !sources.supported
@@ -135,7 +135,7 @@ export function BrowserSettingsPanel() {
                   {status.message}
                 </span>
                 {status.grantFullDiskAccess === true ? (
-                  <Button size="sm" variant="outline" onClick={openFullDiskAccessSettings}>
+                  <Button size="sm" variant="outline" onClick={() => void handleOpenSettings()}>
                     Open System Settings
                   </Button>
                 ) : null}

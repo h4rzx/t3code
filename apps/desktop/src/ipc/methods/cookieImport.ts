@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import * as NodeOS from "node:os";
 
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
+import * as ElectronShell from "../../electron/ElectronShell.ts";
 import type { CookieImportPaths } from "../../preview/CookieImportCatalog.ts";
 import {
   CookieImportError,
@@ -164,3 +165,21 @@ const EMPTY_COUNTS = {
     rejected: 0,
   },
 };
+
+/**
+ * Opens the settings pane that grants the permission a blocked import needs.
+ *
+ * Takes no payload on purpose. `openExternal` allows only http and https so a
+ * renderer cannot reach arbitrary URL handlers, and a settings pane needs a
+ * different scheme; naming the pane in the main process keeps that boundary
+ * where it is instead of widening it for one button.
+ */
+export const openPermissionSettings = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_COOKIE_IMPORT_OPEN_SETTINGS_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.cookieImport.openPermissionSettings")(function* () {
+    const shell = yield* ElectronShell.ElectronShell;
+    return yield* shell.openSystemSettings("full-disk-access");
+  }),
+});
