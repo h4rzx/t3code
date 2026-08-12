@@ -22,7 +22,7 @@ import * as NodeSqlite from "node:sqlite";
 import { describe } from "vite-plus/test";
 
 import { mapChromiumCookie } from "./CookieImportMapping.ts";
-import { readCookieRows } from "./CookieImportService.ts";
+import { isPermissionDenied, readCookieRows } from "./CookieImportService.ts";
 
 /** Well past 2255, which is where the microsecond epoch stops fitting a double. */
 const OVERFLOWING_EXPIRY = "13500000000000000";
@@ -148,4 +148,25 @@ describe("readCookieRows", () => {
       assert.strictEqual(mapping.kind === "write" && "expirationDate" in mapping.cookie, false);
     }),
   );
+});
+
+describe("isPermissionDenied", () => {
+  it("recognises Effect's SystemError, which never mentions the errno", () => {
+    // The original check looked for "EPERM" in the message and therefore
+    // missed every Effect filesystem error, reporting a blocked read as a
+    // corrupt cookie jar.
+    assert.isTrue(isPermissionDenied({ _tag: "SystemError", reason: "PermissionDenied" }));
+  });
+
+  it("recognises a raw Node error", () => {
+    assert.isTrue(isPermissionDenied(Object.assign(new Error("open failed"), { code: "EPERM" })));
+    assert.isTrue(isPermissionDenied(Object.assign(new Error("open failed"), { code: "EACCES" })));
+    assert.isTrue(isPermissionDenied(new Error("EPERM: operation not permitted, open '/x'")));
+  });
+
+  it("does not claim a missing or corrupt file is a permissions problem", () => {
+    assert.isFalse(isPermissionDenied(new Error("ENOENT: no such file or directory")));
+    assert.isFalse(isPermissionDenied({ _tag: "SystemError", reason: "NotFound" }));
+    assert.isFalse(isPermissionDenied(null));
+  });
 });

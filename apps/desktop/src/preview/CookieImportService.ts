@@ -364,19 +364,48 @@ export const listImportableBrowsers = Effect.fn("desktop.cookieImport.listBrowse
  * System Settings toggle, so that case gets its own message rather than a
  * generic "unreadable".
  */
+/**
+ * Whether the OS refused the read, as opposed to the file being missing or
+ * malformed.
+ *
+ * Worth its own function because the answer arrives in three different shapes.
+ * Effect's `SystemError` carries `reason: "PermissionDenied"` and does not put
+ * the errno anywhere in its string form, so checking the message for "EPERM" —
+ * the obvious thing, and what this did — misses every Effect filesystem error
+ * and reports a permissions problem as an unreadable file. The user is then
+ * told their cookie jar is corrupt when it is intact and one setting away.
+ */
+export function isPermissionDenied(cause: unknown): boolean {
+  if (typeof cause === "object" && cause !== null) {
+    const reason = (cause as { readonly reason?: unknown }).reason;
+    if (reason === "PermissionDenied") return true;
+    const code = (cause as { readonly code?: unknown }).code;
+    if (code === "EPERM" || code === "EACCES") return true;
+  }
+  return /\b(EPERM|EACCES|PermissionDenied|operation not permitted|permission denied)\b/i.test(
+    String(cause),
+  );
+}
+
 const readSafariCookies = Effect.fn("desktop.cookieImport.readSafari")(function* (
   cookiePath: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const bytes = yield* fileSystem.readFile(cookiePath).pipe(
-    Effect.catch(
-      (cause) =>
-        new CookieImportError({
-          reason: String(cause).includes("EPERM") ? "permission_denied" : "database_unreadable",
-          detail: String(cause).includes("EPERM")
-            ? "macOS blocked access to Safari's cookies. Grant Full Disk Access to T3 Code in System Settings → Privacy & Security → Full Disk Access, then try again."
-            : `Could not read Safari's cookie jar at ${cookiePath}.`,
-        }),
+    Effect.catch((cause) =>
+      isPermissionDenied(cause)
+        ? new CookieImportError({
+            reason: "permission_denied",
+            // Names the exact setting: "permission denied" alone leaves the
+            // user hunting through System Settings for which of several
+            // privacy panes applies.
+            detail:
+              "macOS blocked access to Safari's cookies. Open System Settings → Privacy & Security → Full Disk Access, enable T3 Code, then quit and reopen the app and try again.",
+          })
+        : new CookieImportError({
+            reason: "database_unreadable",
+            detail: `Could not read Safari's cookie jar at ${cookiePath}: ${String(cause)}`,
+          }),
     ),
   );
   return decodeSafariBinaryCookies(Buffer.from(bytes));
