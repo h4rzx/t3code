@@ -71,13 +71,34 @@ is more robust than selector round-tripping, and unifying on it would remove the
 `refRegistry` entirely, but it is a larger change to ref resolution and staleness than it
 looks.
 
-### `extract --scroll` cannot see what the list never renders
+### A hidden preview is a different browser
 
-The scroll fallback finds rows a virtualized list materialises as it goes, and reports
-`complete: false` when the cap is reached with rows still arriving. It still cannot see a
-list that paginates on the server, and it deduplicates by row content, so two genuinely
-identical rows collapse into one. For an API-backed dashboard, in-page `fetch('/api/...')`
-through `eval` remains cheaper and exact.
+Everything below was found by running automation against a preview no panel
+renders, which is the ordinary case for an agent, and none of it reproduces
+when a human is watching.
+
+- **Timers are throttled.** Chromium slows timers hard in a page it is not
+  compositing: a 40ms `setTimeout` returns after roughly 700ms. Preview
+  webviews now set `setBackgroundThrottling(false)`, but anything running in
+  the page before that takes effect still pays it.
+- **No frames are produced.** `Page.captureScreenshot` and
+  `Page.startScreencast` both hang rather than fail, so snapshots return no
+  image. Forcing device metrics does not help, and neither an owning window
+  nor `document.visibilityState` predicts it — both report the tab as fine.
+  Capture is bounded at 750ms and skipped in effect. Fixing it properly means
+  attaching the webview to an offscreen window.
+- **Scroll events are not dispatched.** Setting `scrollTop` schedules the
+  event through the frame lifecycle, which does not run, so a list's own
+  handler never sees the scroll. `extract --scroll` dispatches the event
+  itself; anything else driving a page by scrolling has to do the same.
+
+### `extract --scroll` still cannot see what the list never renders
+
+It reads a virtualized list correctly — verified at 500 of 500 rows against a
+live one — but it deduplicates by row content, so two genuinely identical rows
+collapse into one, and it cannot see a list that paginates on the server. For
+an API-backed dashboard, in-page `fetch('/api/...')` through `eval` remains
+cheaper and exact.
 
 ### Cookie import
 
