@@ -13,9 +13,11 @@
  * read it back.
  */
 import { assert, it } from "@effect/vitest";
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqlite from "node:sqlite";
 import { describe } from "vite-plus/test";
 
@@ -26,98 +28,124 @@ import { readCookieRows } from "./CookieImportService.ts";
 const OVERFLOWING_EXPIRY = "13500000000000000";
 const SAFE_EXPIRY = "13350000000000000";
 
-const withChromiumDatabase = <A>(
+const NOW_SECONDS = 1_700_000_000;
+
+/** Typed so a fixture that cannot be written fails as itself, not as a defect. */
+class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("FixtureError", {
+  detail: Schema.String,
+}) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+const fixtureFailure = (cause: unknown) =>
+  new FixtureError({ detail: cause instanceof Error ? cause.message : String(cause) });
+
+/**
+ * Writes a database with Chromium's own column types — `expires_utc` as
+ * INTEGER, which is what makes the overflow reachable at all — and reads it
+ * back through the production reader.
+ */
+const readFixture = Effect.fn("test.readFixture")(function* (
   rows: ReadonlyArray<{
     readonly host_key: string;
     readonly name: string;
     readonly expires_utc: string;
   }>,
-  use: (databasePath: string) => A,
-): A => {
-  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-cookie-test-"));
-  const databasePath = NodePath.join(directory, "Cookies");
-  const database = new NodeSqlite.DatabaseSync(databasePath);
-  try {
-    // The columns the reader selects, in Chromium's own types: expires_utc is
-    // INTEGER, which is what makes the overflow reachable at all.
-    database.exec(`CREATE TABLE cookies (
-      host_key TEXT, name TEXT, path TEXT, is_secure INTEGER, is_httponly INTEGER,
-      expires_utc INTEGER, samesite INTEGER, value TEXT, encrypted_value BLOB
-    )`);
-    for (const row of rows) {
-      // Written as a SQL literal rather than a bound parameter, so the driver
-      // never has to represent the value as a double on the way in. Chromium
-      // stores these as plain integers, and reproducing that is the point.
-      database.exec(
-        `INSERT INTO cookies VALUES ('${row.host_key}', '${row.name}', '/', 1, 1, ${row.expires_utc}, 1, 'v', X'')`,
-      );
-    }
-  } finally {
-    database.close();
-  }
-  try {
-    return use(databasePath);
-  } finally {
-    NodeFS.rmSync(directory, { recursive: true, force: true });
-  }
-};
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-cookie-test-" });
+  const databasePath = path.join(directory, "Cookies");
 
-describe("readCookieRows", () => {
-  it("reads a cookie whose expiry overflows a JavaScript number", () => {
-    // Regression: this threw ERR_OUT_OF_RANGE and failed the entire import,
-    // surfacing as "the cookie database could not be opened".
-    const rows = withChromiumDatabase(
-      [{ host_key: ".example.com", name: "session", expires_utc: OVERFLOWING_EXPIRY }],
-      readCookieRows,
-    );
-    assert.strictEqual(rows.length, 1);
-    assert.strictEqual(rows[0]?.expires_utc, OVERFLOWING_EXPIRY);
+  yield* Effect.try({
+    try: () => {
+      const database = new NodeSqlite.DatabaseSync(databasePath);
+      try {
+        database.exec(`CREATE TABLE cookies (
+        host_key TEXT, name TEXT, path TEXT, is_secure INTEGER, is_httponly INTEGER,
+        expires_utc INTEGER, samesite INTEGER, value TEXT, encrypted_value BLOB
+      )`);
+        for (const row of rows) {
+          // Written as a SQL literal rather than a bound parameter, so the driver
+          // never has to represent the value as a double on the way in. Chromium
+          // stores these as plain integers, and reproducing that is the point.
+          database.exec(
+            `INSERT INTO cookies VALUES ('${row.host_key}', '${row.name}', '/', 1, 1, ${row.expires_utc}, 1, 'v', X'')`,
+          );
+        }
+      } finally {
+        database.close();
+      }
+    },
+    catch: fixtureFailure,
   });
 
-  it("returns every row rather than stopping at the first unreadable one", () => {
-    // The original failure was not a dropped row but an abandoned import: one
-    // bad value took the other few thousand cookies with it.
-    const rows = withChromiumDatabase(
-      [
+  return yield* Effect.try({
+    try: () => readCookieRows(databasePath),
+    catch: fixtureFailure,
+  });
+});
+
+const runFixture = (
+  rows: ReadonlyArray<{
+    readonly host_key: string;
+    readonly name: string;
+    readonly expires_utc: string;
+  }>,
+) => readFixture(rows).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+
+describe("readCookieRows", () => {
+  it.effect("reads a cookie whose expiry overflows a JavaScript number", () =>
+    Effect.gen(function* () {
+      // Regression: this threw ERR_OUT_OF_RANGE and failed the entire import,
+      // surfacing as "the cookie database could not be opened".
+      const rows = yield* runFixture([
+        { host_key: ".example.com", name: "session", expires_utc: OVERFLOWING_EXPIRY },
+      ]);
+      assert.strictEqual(rows.length, 1);
+      assert.strictEqual(rows[0]?.expires_utc, OVERFLOWING_EXPIRY);
+    }),
+  );
+
+  it.effect("returns every row rather than stopping at the first unreadable one", () =>
+    Effect.gen(function* () {
+      // The original failure was not a dropped row but an abandoned import: one
+      // bad value took the other few thousand cookies with it.
+      const rows = yield* runFixture([
         { host_key: ".a.com", name: "one", expires_utc: SAFE_EXPIRY },
         { host_key: ".b.com", name: "two", expires_utc: OVERFLOWING_EXPIRY },
         { host_key: ".c.com", name: "three", expires_utc: SAFE_EXPIRY },
-      ],
-      readCookieRows,
-    );
-    assert.deepStrictEqual(
-      rows.map((row) => row.name),
-      ["one", "two", "three"],
-    );
-  });
+      ]);
+      assert.deepStrictEqual(
+        rows.map((row) => row.name),
+        ["one", "two", "three"],
+      );
+    }),
+  );
 
-  it("hands the mapper a value it can turn into a live cookie", () => {
-    // Reading the row is only half of it: the string has to survive mapping,
-    // or a successful read still produces zero imported cookies.
-    const rows = withChromiumDatabase(
-      [{ host_key: ".example.com", name: "session", expires_utc: OVERFLOWING_EXPIRY }],
-      readCookieRows,
-    );
-    const mapping = mapChromiumCookie({
-      row: rows[0]!,
-      value: "abc",
-      nowSeconds: 1_700_000_000,
-    });
-    assert.strictEqual(mapping.kind, "write");
-    assert.strictEqual(mapping.kind === "write" && mapping.cookie.domain, ".example.com");
-  });
+  it.effect("hands the mapper a value it can turn into a live cookie", () =>
+    Effect.gen(function* () {
+      // Reading the row is only half of it: the string has to survive mapping,
+      // or a successful read still produces zero imported cookies.
+      const rows = yield* runFixture([
+        { host_key: ".example.com", name: "session", expires_utc: OVERFLOWING_EXPIRY },
+      ]);
+      const mapping = mapChromiumCookie({ row: rows[0]!, value: "abc", nowSeconds: NOW_SECONDS });
+      assert.strictEqual(mapping.kind, "write");
+      assert.strictEqual(mapping.kind === "write" && mapping.cookie.domain, ".example.com");
+    }),
+  );
 
-  it("reads a session cookie, which has no expiry at all", () => {
-    const rows = withChromiumDatabase(
-      [{ host_key: ".example.com", name: "session", expires_utc: "0" }],
-      readCookieRows,
-    );
-    const mapping = mapChromiumCookie({
-      row: rows[0]!,
-      value: "abc",
-      nowSeconds: 1_700_000_000,
-    });
-    assert.strictEqual(mapping.kind, "write");
-    assert.strictEqual(mapping.kind === "write" && "expirationDate" in mapping.cookie, false);
-  });
+  it.effect("reads a session cookie, which has no expiry at all", () =>
+    Effect.gen(function* () {
+      const rows = yield* runFixture([
+        { host_key: ".example.com", name: "session", expires_utc: "0" },
+      ]);
+      const mapping = mapChromiumCookie({ row: rows[0]!, value: "abc", nowSeconds: NOW_SECONDS });
+      assert.strictEqual(mapping.kind, "write");
+      assert.strictEqual(mapping.kind === "write" && "expirationDate" in mapping.cookie, false);
+    }),
+  );
 });
