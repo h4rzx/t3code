@@ -26,6 +26,8 @@ import {
 } from "./auth.ts";
 import { AuthSessionId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import { PreviewSessionSnapshot, PreviewTabId } from "./preview.ts";
+import { PreviewAutomationOperation } from "./previewAutomation.ts";
 import {
   ClientOrchestrationCommand,
   DispatchResult,
@@ -545,6 +547,158 @@ export class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullReque
     ],
   }).middleware(EnvironmentAuthenticatedAuth),
 ) {}
+/**
+ * Browser automation over plain HTTP, for callers that have no MCP provider
+ * session: the `t3 browser` CLI and anything scripting it. The MCP toolkit and
+ * this group share one broker, so a CLI-driven tab is the same collaborative
+ * tab a human or an in-thread agent sees.
+ *
+ * `input` stays `Unknown` on the wire and is decoded server-side against the
+ * schema for `operation`, so the operation set here never drifts from the MCP
+ * tools.
+ */
+export const EnvironmentPreviewAutomationRequest = Schema.Struct({
+  operation: PreviewAutomationOperation,
+  input: Schema.optional(Schema.Unknown),
+  tabId: Schema.optional(PreviewTabId),
+  /** Defaults to the shared CLI browser thread when omitted. */
+  threadId: Schema.optional(ThreadId),
+  /**
+   * Follow a mutating operation with a cheap status read and report what moved.
+   * Defaults to true; disable for latency-sensitive batches.
+   */
+  observe: Schema.optional(Schema.Boolean),
+});
+export type EnvironmentPreviewAutomationRequest = typeof EnvironmentPreviewAutomationRequest.Type;
+
+/**
+ * What changed in the page as a direct result of the operation. Returned with
+ * every mutating call so an agent can decide whether it needs a fresh snapshot,
+ * instead of reflexively taking one after every click.
+ */
+export const EnvironmentPreviewObservation = Schema.Struct({
+  url: Schema.NullOr(Schema.String),
+  title: Schema.NullOr(Schema.String),
+  loading: Schema.Boolean,
+  urlChanged: Schema.Boolean,
+  titleChanged: Schema.Boolean,
+  /** Refs from the last snapshot no longer resolve; take a new snapshot. */
+  refsStale: Schema.Boolean,
+  /**
+   * The page looks like a sign-in wall. Imported cookies expire, and an agent
+   * that cannot tell "logged out" from "no data" will confidently report an
+   * empty dashboard. Advisory, not authoritative: it is a URL/title heuristic.
+   */
+  signedOut: Schema.optional(Schema.Boolean),
+});
+export type EnvironmentPreviewObservation = typeof EnvironmentPreviewObservation.Type;
+
+export const EnvironmentPreviewAutomationResult = Schema.Struct({
+  threadId: ThreadId,
+  tabId: Schema.NullOr(PreviewTabId),
+  result: Schema.Unknown,
+  observed: Schema.optional(EnvironmentPreviewObservation),
+});
+export type EnvironmentPreviewAutomationResult = typeof EnvironmentPreviewAutomationResult.Type;
+
+export const EnvironmentPreviewTabCloseRequest = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+  /** Omit to close every tab the thread owns. */
+  tabId: Schema.optional(PreviewTabId),
+});
+export type EnvironmentPreviewTabCloseRequest = typeof EnvironmentPreviewTabCloseRequest.Type;
+
+export const EnvironmentPreviewTabCloseResult = Schema.Struct({
+  threadId: ThreadId,
+  closed: Schema.Boolean,
+});
+export type EnvironmentPreviewTabCloseResult = typeof EnvironmentPreviewTabCloseResult.Type;
+
+export const EnvironmentPreviewTabsResult = Schema.Struct({
+  threadId: ThreadId,
+  tabs: Schema.Array(PreviewSessionSnapshot),
+});
+export type EnvironmentPreviewTabsResult = typeof EnvironmentPreviewTabsResult.Type;
+
+/**
+ * A browser host refused or could not complete the operation. `reason` carries
+ * the originating `PreviewAutomation*Error` tag so callers can branch on it
+ * without this module re-declaring every broker error shape.
+ */
+/**
+ * Stable, machine-readable failure codes. Agents branch on these and follow the
+ * `recovery` command instead of parsing prose, so the wording of a message can
+ * change without breaking a caller.
+ */
+export const EnvironmentPreviewFailureCode = Schema.Literals([
+  "preview_no_host",
+  "preview_no_tab",
+  "preview_tab_not_found",
+  "preview_stale_ref",
+  "preview_timeout",
+  "preview_invalid_selector",
+  "preview_target_not_editable",
+  "preview_result_too_large",
+  "preview_unsupported_operation",
+  "preview_host_disconnected",
+  "preview_execution_failed",
+]);
+export type EnvironmentPreviewFailureCode = typeof EnvironmentPreviewFailureCode.Type;
+
+export class EnvironmentPreviewAutomationError extends Schema.TaggedErrorClass<EnvironmentPreviewAutomationError>()(
+  "EnvironmentPreviewAutomationError",
+  {
+    code: Schema.Literal("preview_automation_failed"),
+    failure: EnvironmentPreviewFailureCode,
+    /** Originating `PreviewAutomation*Error` tag, for diagnostics. */
+    reason: TrimmedNonEmptyString,
+    detail: Schema.String,
+    /** Concrete next command that usually clears this failure. */
+    recovery: Schema.String,
+    traceId: TrimmedNonEmptyString,
+  },
+  { httpApiStatus: 502 },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+  [HttpServerRespondable.symbol]() {
+    return HttpServerResponse.schemaJson(EnvironmentPreviewAutomationError)(this, { status: 502 });
+  }
+}
+
+const EnvironmentPreviewAutomationErrors = [
+  EnvironmentRequestInvalidError,
+  EnvironmentScopeRequiredError,
+  EnvironmentPreviewAutomationError,
+  EnvironmentInternalError,
+] as const;
+
+export class EnvironmentPreviewHttpApi extends HttpApiGroup.make("preview")
+  .add(
+    HttpApiEndpoint.post("automation", "/api/preview/automation", {
+      headers: OptionalBearerHeaders,
+      payload: EnvironmentPreviewAutomationRequest,
+      success: EnvironmentPreviewAutomationResult,
+      error: EnvironmentPreviewAutomationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("tabs", "/api/preview/tabs", {
+      headers: OptionalBearerHeaders,
+      payload: { threadId: Schema.optional(ThreadId) },
+      success: EnvironmentPreviewTabsResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("closeTab", "/api/preview/tabs/close", {
+      headers: OptionalBearerHeaders,
+      payload: EnvironmentPreviewTabCloseRequest,
+      success: EnvironmentPreviewTabCloseResult,
+      error: EnvironmentPreviewAutomationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
 
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
@@ -612,4 +766,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
+  .add(EnvironmentPreviewHttpApi)
   .add(EnvironmentConnectHttpApi) {}
