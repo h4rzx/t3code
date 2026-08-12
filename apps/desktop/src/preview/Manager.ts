@@ -99,6 +99,8 @@ const MAX_EVALUATION_BYTES = 64_000;
 const MAX_VISIBLE_TEXT_LENGTH = 20_000;
 const MAX_INTERACTIVE_ELEMENTS = 200;
 const MAX_SCREENSHOT_WIDTH = 1280;
+/** Bound on capturePage(), which never settles when the webview is not painted. */
+const SNAPSHOT_CAPTURE_TIMEOUT = "2 seconds";
 const RECORDING_FRAME_INTERVAL_MS = Math.ceil(1_000 / 12);
 const RECORDING_JPEG_QUALITY = 80;
 const PICTURE_IN_PICTURE_INITIAL_WIDTH = 480;
@@ -2621,10 +2623,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const captureAutomationSnapshot = Effect.fn("PreviewManager.captureAutomationSnapshot")(
     function* (tabId: string, wc: Electron.WebContents, send: SendCommand) {
-      yield* Effect.all([send("Runtime.enable"), send("Accessibility.enable")], {
-        concurrency: 2,
-        discard: true,
-      });
+      // Page is needed for captureScreenshot; enabling it is cheap and lets the
+      // capture work on a webview the compositor has never painted.
+      yield* Effect.all(
+        [send("Runtime.enable"), send("Accessibility.enable"), send("Page.enable")],
+        { concurrency: 3, discard: true },
+      );
       const page = yield* evaluateWithDebugger<{
         url: string;
         title: string;
@@ -2658,13 +2662,28 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             return buildParts(element).join(" > ");
           };
           const visible = (element) => {
+            // checkVisibility walks ancestors and honors content-visibility and
+            // opacity. Checking the element's own computed style misses the
+            // common responsive pattern where a duplicate lives inside a
+            // display:none wrapper — those got refs an agent could not click,
+            // while the copy actually on screen went unlisted.
+            if (typeof element.checkVisibility === "function" &&
+                !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+              return false;
+            }
             const style = getComputedStyle(element);
             const rect = element.getBoundingClientRect();
-            return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+            if (style.visibility === "hidden" || style.display === "none") return false;
+            if (rect.width <= 0 || rect.height <= 0) return false;
+            // Off-screen responsive copies are positioned outside the viewport
+            // rather than hidden; they are not addressable either.
+            return rect.bottom > 0 && rect.right > 0;
           };
-          const elements = Array.from(document.querySelectorAll(
+          const allInteractive = Array.from(document.querySelectorAll(
             "a[href],button,input,textarea,select,[role],[tabindex]"
-          )).filter(visible).slice(0, ${MAX_INTERACTIVE_ELEMENTS}).map((element) => {
+          )).filter(visible);
+          const totalInteractive = allInteractive.length;
+          const elements = allInteractive.slice(0, ${MAX_INTERACTIVE_ELEMENTS}).map((element) => {
             const rect = element.getBoundingClientRect();
             return {
               tag: element.tagName.toLowerCase(),
@@ -2677,11 +2696,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               height: rect.height
             };
           });
+          const fullText = document.body?.innerText || "";
           return {
             url: location.href,
             title: document.title,
             loading: document.readyState !== "complete",
-            visibleText: (document.body?.innerText || "").slice(0, ${MAX_VISIBLE_TEXT_LENGTH}),
+            visibleText: fullText.slice(0, ${MAX_VISIBLE_TEXT_LENGTH}),
+            // Report what the page actually holds, so a caller can tell a short
+            // page from one that was cut. Without these, the hard caps above
+            // truncate silently and a partial read looks complete.
+            visibleTextTotal: fullText.length,
+            interactiveElementsTotal: totalInteractive,
             interactiveElements: elements
           };
         })()`,
@@ -2689,23 +2714,29 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       const [accessibility, sourceImage, diagnostics, timelines] = yield* Effect.all([
         send("Accessibility.getFullAXTree"),
-        attemptPromise(
-          {
-            operation: "automationSnapshot.capturePage",
-            tabId,
-            webContentsId: wc.id,
-          },
-          () => wc.capturePage(),
+        // Page.captureScreenshot renders through the compositor, so it works on
+        // a webview that was never painted — unlike capturePage(), which hangs
+        // offscreen. Still bounded and optional: an agent driving a hidden tab
+        // must get the element tree even if the image cannot be produced.
+        send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }).pipe(
+          Effect.map((result) => (result as { readonly data?: string }).data ?? null),
+          Effect.timeoutOption(SNAPSHOT_CAPTURE_TIMEOUT),
+          Effect.map((captured) => Option.getOrNull(captured) ?? null),
+          Effect.orElseSucceed(() => null),
         ),
         Ref.get(diagnosticsRef),
         Ref.get(actionTimelineRef),
       ]);
-      const sourceSize = sourceImage.getSize();
+      const decoded =
+        sourceImage === null
+          ? null
+          : nativeImage.createFromBuffer(Buffer.from(sourceImage, "base64"));
       const image =
-        sourceSize.width > MAX_SCREENSHOT_WIDTH
-          ? sourceImage.resize({ width: MAX_SCREENSHOT_WIDTH })
-          : sourceImage;
-      const size = image.getSize();
+        decoded === null || decoded.isEmpty()
+          ? null
+          : decoded.getSize().width > MAX_SCREENSHOT_WIDTH
+            ? decoded.resize({ width: MAX_SCREENSHOT_WIDTH })
+            : decoded;
       const browserDiagnostics = diagnostics.get(wc.id);
       return {
         ...page,
@@ -2713,12 +2744,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         consoleEntries: [...(browserDiagnostics?.consoleEntries ?? [])],
         networkEntries: [...(browserDiagnostics?.networkEntries ?? [])],
         actionTimeline: [...(timelines.get(tabId) ?? [])],
-        screenshot: {
-          mimeType: "image/png" as const,
-          data: image.toPNG().toString("base64"),
-          width: size.width,
-          height: size.height,
-        },
+        screenshot:
+          image === null
+            ? null
+            : {
+                mimeType: "image/png" as const,
+                data: image.toPNG().toString("base64"),
+                width: image.getSize().width,
+                height: image.getSize().height,
+              },
       };
     },
   );
@@ -2747,7 +2781,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       locator,
     );
     const point = yield* evaluateWithDebugger<
-      { x: number; y: number } | { invalidSelector: true; message: string } | { notFound: true }
+      | { x: number; y: number }
+      | { invalidSelector: true; message: string }
+      | { ambiguous: true; matchCount: number }
+      | { notActionable: true; reason: "hidden" | "disabled"; matchCount: number }
+      | { notFound: true; matchCount: number }
     >(
       tabId,
       send,
@@ -2755,11 +2793,34 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           try {
             const injected = globalThis.__t3PlaywrightInjected;
             const parsed = injected.parseSelector(${locatorJson});
+            // Count first. A strict-mode violation otherwise surfaces as a bare
+            // "invalid selector", so an agent cannot tell a typo from a
+            // selector that matched three responsive copies of one control —
+            // and retries the same selector instead of narrowing it.
+            let matchCount = null;
+            try {
+              const all = injected.querySelectorAll(parsed, document);
+              matchCount = all ? all.length : null;
+            } catch (countError) {
+              matchCount = null;
+            }
+            if (matchCount !== null && matchCount > 1) {
+              return { ambiguous: true, matchCount };
+            }
             const element = injected.querySelector(parsed, document, true);
-            if (!element) return { notFound: true };
+            if (!element) return { notFound: true, matchCount: matchCount === null ? 0 : matchCount };
             const visible = injected.elementState(element, "visible");
             const enabled = injected.elementState(element, "enabled");
-            if (!visible.matches || !enabled.matches) return { notFound: true };
+            // Matched but unusable is a different problem from no match, and
+            // reporting both as "could not find" makes an agent retry the same
+            // selector instead of picking a different element.
+            if (!visible.matches || !enabled.matches) {
+              return {
+                notActionable: true,
+                reason: !visible.matches ? "hidden" : "disabled",
+                matchCount: matchCount === null ? 1 : matchCount,
+              };
+            }
             element.scrollIntoView({ block: "center", inline: "center" });
             const rect = element.getBoundingClientRect();
             return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -2776,6 +2837,33 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         ...automationSelectorDiagnostics(input),
         reasonLength: point.message.length,
         cause: point,
+      });
+    }
+    if ("ambiguous" in point) {
+      return yield* new PreviewAutomationInvalidSelectorError({
+        operation: "click",
+        tabId,
+        ...automationSelectorDiagnostics(input),
+        reasonLength: point.matchCount,
+        cause: {
+          ambiguous: true,
+          matchCount: point.matchCount,
+          message: `The selector matched ${point.matchCount} elements. Narrow it, or snapshot and click a ref (--element @eN), which always identifies one element.`,
+        },
+      });
+    }
+    if ("notActionable" in point) {
+      return yield* new PreviewAutomationInvalidSelectorError({
+        operation: "click",
+        tabId,
+        ...automationSelectorDiagnostics(input),
+        reasonLength: point.matchCount,
+        cause: {
+          notActionable: true,
+          reason: point.reason,
+          matchCount: point.matchCount,
+          message: `The selector matched ${point.matchCount} element${point.matchCount === 1 ? "" : "s"}, but the one it resolved to is ${point.reason}. Snapshot and click a ref (--element @eN), which only ever lists elements that are on screen.`,
+        },
       });
     }
     if ("notFound" in point) {
