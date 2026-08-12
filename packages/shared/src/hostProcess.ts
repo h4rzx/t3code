@@ -44,6 +44,18 @@ export const HostProcessExecutablePath = Context.Reference<string>(
   },
 );
 
+/**
+ * Read lazily rather than captured once: a process that outlives its parent is
+ * reparented, so this value changes underneath a long-running process and that
+ * change is the only portable signal that the parent is gone.
+ */
+export const HostProcessParentId = Context.Reference<() => number>(
+  "@t3tools/shared/hostProcess/HostProcessParentId",
+  {
+    defaultValue: () => () => process.ppid,
+  },
+);
+
 export const HostProcessArguments = Context.Reference<ReadonlyArray<string>>(
   "@t3tools/shared/hostProcess/HostProcessArguments",
   {

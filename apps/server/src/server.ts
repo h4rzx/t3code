@@ -10,6 +10,7 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as ServerConfig from "./config.ts";
+import { awaitOrphaned } from "./parentWatchdog.ts";
 import {
   otlpTracesProxyRouteLayer,
   assetRouteLayer,
@@ -685,4 +686,15 @@ export const makeServerLayer = Layer.unwrap(
 );
 
 // The CLI supplies configuration.
-export const runServer = Layer.launch(makeServerLayer);
+//
+// Racing the watchdog rather than forking it: completing the race interrupts
+// the launch, so an orphaned server tears down through the same shutdown path
+// as a signal instead of exiting mid-write.
+export const runServer = Effect.gen(function* () {
+  const config = yield* ServerConfig.ServerConfig;
+  // Only a desktop-spawned server has a parent whose death should end it. A
+  // `t3 serve` under nohup or a service manager is expected to outlive its
+  // launcher.
+  if (config.mode !== "desktop") return yield* Layer.launch(makeServerLayer);
+  return yield* Effect.raceFirst(Layer.launch(makeServerLayer), awaitOrphaned);
+});
