@@ -52,3 +52,27 @@ export function desktopErrorTag(cause: unknown): string | null {
 export function isDesktopError(cause: unknown, tag: string): boolean {
   return desktopErrorTag(cause) === tag;
 }
+
+/**
+ * The message a person should read, with Electron's plumbing removed.
+ *
+ * A rejection arrives as `Error invoking remote method
+ * 'desktop:preview-cookie-import-run': CookieImportError: <the actual
+ * message>`. Shown as-is, two thirds of the line is a channel name and a class
+ * name, and the sentence that tells the user what to do about it starts
+ * halfway through. Falls back to the whole message rather than an empty one
+ * when there is no prefix to strip.
+ */
+export function desktopErrorMessage(cause: unknown, fallback: string): string {
+  const message =
+    cause instanceof Error
+      ? cause.message
+      : typeof cause === "string"
+        ? cause
+        : typeof cause === "object" && cause !== null && "message" in cause
+          ? String((cause as { readonly message: unknown }).message)
+          : "";
+  const withoutPrefix = message.replace(REMOTE_METHOD_PREFIX, "");
+  const withoutName = withoutPrefix.replace(LEADING_ERROR_NAME, "").trim();
+  return withoutName.length > 0 ? withoutName : withoutPrefix.trim() || fallback;
+}

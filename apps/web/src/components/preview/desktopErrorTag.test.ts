@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { desktopErrorTag, isDesktopError } from "./desktopErrorTag";
+import { desktopErrorMessage, desktopErrorTag, isDesktopError } from "./desktopErrorTag";
 
 describe("desktopErrorTag", () => {
   it("recovers the tag from an Electron IPC rejection", () => {
@@ -53,5 +53,25 @@ describe("isDesktopError", () => {
     );
     expect(isDesktopError(cause, "PreviewAutomationTargetNotEditableError")).toBe(true);
     expect(isDesktopError(cause, "PreviewAutomationInvalidSelectorError")).toBe(false);
+  });
+});
+
+describe("desktopErrorMessage", () => {
+  it("strips Electron's plumbing so the actionable sentence leads", () => {
+    const cause = new Error(
+      "Error invoking remote method 'desktop:preview-cookie-import-run': CookieImportError: macOS blocked access to Safari's cookies.",
+    );
+    expect(desktopErrorMessage(cause, "The import failed.")).toBe(
+      "macOS blocked access to Safari's cookies.",
+    );
+  });
+
+  it("keeps a message that has no prefix to strip", () => {
+    expect(desktopErrorMessage(new Error("Something broke"), "fallback")).toBe("Something broke");
+  });
+
+  it("falls back rather than showing an empty line", () => {
+    expect(desktopErrorMessage(undefined, "The import failed.")).toBe("The import failed.");
+    expect(desktopErrorMessage(new Error(""), "The import failed.")).toBe("The import failed.");
   });
 });

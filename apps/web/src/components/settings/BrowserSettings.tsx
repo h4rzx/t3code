@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DesktopCookieImportSources } from "@t3tools/contracts";
 
+import { desktopErrorMessage } from "../preview/desktopErrorTag";
 import { previewBridge } from "../preview/previewBridge";
 import { useProjects } from "~/state/entities";
 import { Button } from "../ui/button";
@@ -38,7 +39,7 @@ export function BrowserSettingsPanel() {
         setSources({ supported: true, sources: [] });
         setStatus({
           tone: "error",
-          message: error instanceof Error ? error.message : "Could not list installed browsers.",
+          message: desktopErrorMessage(error, "Could not list installed browsers."),
         });
       });
     return () => {
@@ -63,7 +64,7 @@ export function BrowserSettingsPanel() {
     } catch (error: unknown) {
       setStatus({
         tone: "error",
-        message: error instanceof Error ? error.message : "The import failed.",
+        message: desktopErrorMessage(error, "The import failed."),
       });
     } finally {
       setIsImporting(false);
@@ -79,7 +80,7 @@ export function BrowserSettingsPanel() {
     } catch (error: unknown) {
       setStatus({
         tone: "error",
-        message: error instanceof Error ? error.message : "Could not clear the preview browser.",
+        message: desktopErrorMessage(error, "Could not clear the preview browser."),
       });
     }
   }, [bridge]);
