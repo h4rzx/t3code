@@ -2621,6 +2621,70 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         };
   });
 
+  /**
+   * A base64 PNG of the page, or null when even a forced capture yields
+   * nothing.
+   *
+   * Chromium's compositor produces no frame for a webview that is not on
+   * screen, so a plain capture comes back empty for exactly the case
+   * background automation cares about — an agent driving a tab while the
+   * preview panel is closed. Overriding device metrics forces a resize and
+   * therefore a frame, whether or not the widget is visible.
+   *
+   * Tried only as a fallback: the override is a real change to the page's
+   * view, and imposing it on a visible preview would make the panel flicker
+   * on every snapshot for no gain.
+   */
+  const captureAutomationImage = Effect.fn("PreviewManager.captureAutomationImage")(function* (
+    tabId: string,
+    send: SendCommand,
+  ) {
+    const capture = send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: false,
+    }).pipe(
+      Effect.map((result) => {
+        const data = (result as { readonly data?: unknown }).data;
+        // An unpainted page answers with an empty string rather than failing,
+        // which would otherwise read as a successful capture of nothing.
+        return typeof data === "string" && data.length > 0 ? data : null;
+      }),
+      Effect.timeoutOption(SNAPSHOT_CAPTURE_TIMEOUT),
+      Effect.map(Option.getOrNull),
+      Effect.orElseSucceed(() => null),
+    );
+
+    const direct = yield* capture;
+    if (direct !== null) return direct;
+
+    const metrics = yield* evaluateWithDebugger<{
+      readonly width: number;
+      readonly height: number;
+      readonly deviceScaleFactor: number;
+    } | null>(
+      tabId,
+      send,
+      `({ width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio })`,
+      true,
+    ).pipe(Effect.orElseSucceed(() => null));
+    if (metrics === null || metrics.width <= 0 || metrics.height <= 0) return null;
+
+    return yield* Effect.acquireUseRelease(
+      send("Emulation.setDeviceMetricsOverride", {
+        width: metrics.width,
+        height: metrics.height,
+        deviceScaleFactor: metrics.deviceScaleFactor,
+        mobile: false,
+      }),
+      () => capture,
+      () =>
+        // Always cleared: leaving an override in place pins the page to the
+        // size it had while hidden, so it would stop reflowing when the panel
+        // is reopened.
+        send("Emulation.clearDeviceMetricsOverride").pipe(Effect.ignore),
+    ).pipe(Effect.orElseSucceed(() => null));
+  });
+
   const captureAutomationSnapshot = Effect.fn("PreviewManager.captureAutomationSnapshot")(
     function* (tabId: string, wc: Electron.WebContents, send: SendCommand) {
       // Page is needed for captureScreenshot; enabling it is cheap and lets the
@@ -2714,16 +2778,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       const [accessibility, sourceImage, diagnostics, timelines] = yield* Effect.all([
         send("Accessibility.getFullAXTree"),
-        // Page.captureScreenshot renders through the compositor, so it works on
-        // a webview that was never painted — unlike capturePage(), which hangs
-        // offscreen. Still bounded and optional: an agent driving a hidden tab
-        // must get the element tree even if the image cannot be produced.
-        send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }).pipe(
-          Effect.map((result) => (result as { readonly data?: string }).data ?? null),
-          Effect.timeoutOption(SNAPSHOT_CAPTURE_TIMEOUT),
-          Effect.map((captured) => Option.getOrNull(captured) ?? null),
-          Effect.orElseSucceed(() => null),
-        ),
+        // Optional by design: an agent driving a hidden tab must still get the
+        // element tree even when no image can be produced at all.
+        captureAutomationImage(tabId, send),
         Ref.get(diagnosticsRef),
         Ref.get(actionTimelineRef),
       ]);
