@@ -151,11 +151,34 @@ describe("readCookieRows", () => {
 });
 
 describe("isPermissionDenied", () => {
-  it("recognises Effect's SystemError, which never mentions the errno", () => {
-    // The original check looked for "EPERM" in the message and therefore
-    // missed every Effect filesystem error, reporting a blocked read as a
-    // corrupt cookie jar.
+  it("finds the errno Effect buries under an Unknown reason", () => {
+    // Verbatim shape of a real blocked read. Neither the message nor the
+    // top-level reason says anything about permissions: the message is
+    // "PlatformError: Unknown: FileSystem.readFile (<path>)" and the reason
+    // classifies it as Unknown. Both were checked before this, and both
+    // reported an intact cookie jar as corrupt.
+    assert.isTrue(
+      isPermissionDenied({
+        _tag: "PlatformError",
+        reason: {
+          _tag: "Unknown",
+          module: "FileSystem",
+          method: "readFile",
+          syscall: "open",
+          cause: { errno: -1, code: "EPERM", syscall: "open", path: "/x" },
+        },
+      }),
+    );
+  });
+
+  it("still recognises the plain PermissionDenied reason", () => {
     assert.isTrue(isPermissionDenied({ _tag: "SystemError", reason: "PermissionDenied" }));
+  });
+
+  it("terminates on a cause that points back at itself", () => {
+    const looping: Record<string, unknown> = { _tag: "PlatformError" };
+    looping["cause"] = looping;
+    assert.isFalse(isPermissionDenied(looping));
   });
 
   it("recognises a raw Node error", () => {
@@ -167,6 +190,12 @@ describe("isPermissionDenied", () => {
   it("does not claim a missing or corrupt file is a permissions problem", () => {
     assert.isFalse(isPermissionDenied(new Error("ENOENT: no such file or directory")));
     assert.isFalse(isPermissionDenied({ _tag: "SystemError", reason: "NotFound" }));
+    assert.isFalse(
+      isPermissionDenied({
+        _tag: "PlatformError",
+        reason: { _tag: "Unknown", cause: { code: "ENOENT" } },
+      }),
+    );
     assert.isFalse(isPermissionDenied(null));
   });
 });

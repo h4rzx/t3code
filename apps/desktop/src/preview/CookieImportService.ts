@@ -368,23 +368,38 @@ export const listImportableBrowsers = Effect.fn("desktop.cookieImport.listBrowse
  * Whether the OS refused the read, as opposed to the file being missing or
  * malformed.
  *
- * Worth its own function because the answer arrives in three different shapes.
- * Effect's `SystemError` carries `reason: "PermissionDenied"` and does not put
- * the errno anywhere in its string form, so checking the message for "EPERM" —
- * the obvious thing, and what this did — misses every Effect filesystem error
- * and reports a permissions problem as an unreadable file. The user is then
- * told their cookie jar is corrupt when it is intact and one setting away.
+ * The answer is buried. Effect's `PlatformError` stringifies as
+ * `PlatformError: Unknown: FileSystem.readFile (<path>)` — no errno, and a
+ * `reason` that is an object classifying this as "Unknown" rather than a
+ * permissions problem. The errno sits two levels down, on the Node error
+ * underneath:
+ *
+ *   { _tag: "PlatformError",
+ *     reason: { _tag: "Unknown", cause: { code: "EPERM", ... } } }
+ *
+ * So neither the message nor the top-level reason answers the question, and
+ * both were tried. Walking the chain is what actually works, and getting it
+ * wrong tells the user their cookie jar is corrupt when it is intact and one
+ * setting away.
  */
 export function isPermissionDenied(cause: unknown): boolean {
-  if (typeof cause === "object" && cause !== null) {
-    const reason = (cause as { readonly reason?: unknown }).reason;
-    if (reason === "PermissionDenied") return true;
-    const code = (cause as { readonly code?: unknown }).code;
-    if (code === "EPERM" || code === "EACCES") return true;
-  }
-  return /\b(EPERM|EACCES|PermissionDenied|operation not permitted|permission denied)\b/i.test(
-    String(cause),
-  );
+  const DENIED = new Set(["EPERM", "EACCES"]);
+  const seen = new Set<unknown>();
+  const visit = (node: unknown, depth: number): boolean => {
+    if (depth > 6 || node === null || node === undefined) return false;
+    if (typeof node === "string") return node === "PermissionDenied";
+    if (typeof node !== "object" || seen.has(node)) return false;
+    seen.add(node);
+    const record = node as Record<string, unknown>;
+    if (typeof record["code"] === "string" && DENIED.has(record["code"])) return true;
+    if (record["_tag"] === "PermissionDenied" || record["reason"] === "PermissionDenied") {
+      return true;
+    }
+    return visit(record["reason"], depth + 1) || visit(record["cause"], depth + 1);
+  };
+  if (visit(cause, 0)) return true;
+  // A plain Error carries the errno only in its text.
+  return /\b(EPERM|EACCES)\b|operation not permitted|permission denied/i.test(String(cause));
 }
 
 const readSafariCookies = Effect.fn("desktop.cookieImport.readSafari")(function* (
