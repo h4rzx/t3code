@@ -38,6 +38,11 @@ export function toChoices(sources: CookieImportSourceList): ReadonlyArray<Profil
  */
 export function describeImportResult(result: DesktopCookieImportResult): string {
   if (result.status === "cancelled") return "Import cancelled.";
+  // Nothing was read, so the counts below would say "0 cookies imported." and
+  // hide the only fact that matters: the OS is withholding access.
+  if (result.status === "permission_required") {
+    return result.detail ?? "Importing these cookies needs a permission macOS has not granted.";
+  }
 
   const { skipped } = result;
   const reasons: Array<string> = [];

@@ -131,7 +131,24 @@ export const run = DesktopIpc.makeIpcMethod({
       cookiePath: profile.cookiePath,
       sessions,
       nowSeconds: Math.floor((yield* Clock.currentTimeMillis) / 1000),
-    });
+    }).pipe(
+      // A withheld permission is not a failure of the import: nothing is wrong
+      // with the browser or its cookies, and there is a specific thing the
+      // user can do about it. Returning it as an outcome lets the UI offer
+      // that action instead of printing the path to it.
+      Effect.catchIf(
+        (error): error is CookieImportError =>
+          error._tag === "CookieImportError" && error.reason === "permission_denied",
+        (error) => Effect.succeed({ permissionRequired: error.detail } as const),
+      ),
+    );
+    if ("permissionRequired" in summary) {
+      return {
+        status: "permission_required" as const,
+        detail: summary.permissionRequired,
+        ...EMPTY_COUNTS,
+      };
+    }
     return { status: "imported" as const, imported: summary.imported, skipped: summary.skipped };
   }),
 });

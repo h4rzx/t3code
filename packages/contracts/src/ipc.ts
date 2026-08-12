@@ -1016,10 +1016,20 @@ export const DesktopCookieImportSkippedSchema = Schema.Struct({
 });
 
 export const DesktopCookieImportResultSchema = Schema.Struct({
-  /** "cancelled" when the user declined the confirmation dialog. */
-  status: Schema.Literals(["imported", "cancelled"]),
+  /**
+   * "cancelled" when the user declined the confirmation dialog.
+   *
+   * "permission_required" is an outcome rather than a failure: the browser and
+   * its cookies are exactly where they should be, and the OS is withholding
+   * access until the user grants it. Reporting it as an error leaves the UI
+   * with nothing but a sentence of instructions, when what the user needs is
+   * the settings pane those instructions describe.
+   */
+  status: Schema.Literals(["imported", "cancelled", "permission_required"]),
   imported: Schema.Int,
   skipped: DesktopCookieImportSkippedSchema,
+  /** What to tell the user, when the status alone does not say it. */
+  detail: Schema.optional(Schema.String),
 });
 export type DesktopCookieImportResult = typeof DesktopCookieImportResultSchema.Type;
 

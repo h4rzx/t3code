@@ -411,11 +411,11 @@ const readSafariCookies = Effect.fn("desktop.cookieImport.readSafari")(function*
       isPermissionDenied(cause)
         ? new CookieImportError({
             reason: "permission_denied",
-            // Names the exact setting: "permission denied" alone leaves the
-            // user hunting through System Settings for which of several
-            // privacy panes applies.
+            // Says what happened and what it will take, and stops there. The
+            // steps live in a button that opens the pane, because a path
+            // through System Settings is something to follow, not to read.
             detail:
-              "macOS blocked access to Safari's cookies. Open System Settings → Privacy & Security → Full Disk Access, enable T3 Code, then quit and reopen the app and try again.",
+              "macOS keeps Safari's cookies behind Full Disk Access. Grant it to T3 Code, then quit and reopen the app.",
           })
         : new CookieImportError({
             reason: "database_unreadable",

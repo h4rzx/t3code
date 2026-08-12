@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DesktopCookieImportSources } from "@t3tools/contracts";
 
 import { desktopErrorMessage } from "../preview/desktopErrorTag";
+import { readLocalApi } from "~/localApi";
 import { previewBridge } from "../preview/previewBridge";
 import { useProjects } from "~/state/entities";
 import { Button } from "../ui/button";
@@ -10,6 +11,20 @@ import { Spinner } from "../ui/spinner";
 import { describeImportResult, toChoices } from "./BrowserSettings.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+
+/**
+ * The Full Disk Access pane, addressed directly.
+ *
+ * macOS exposes individual privacy panes as URLs, so the user lands on the
+ * list they need to change rather than at the top of System Settings with a
+ * sentence to follow. `Privacy_AllFiles` is the Full Disk Access anchor.
+ */
+const FULL_DISK_ACCESS_SETTINGS_URL =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+const openFullDiskAccessSettings = () => {
+  void readLocalApi()?.shell.openExternal(FULL_DISK_ACCESS_SETTINGS_URL);
+};
 
 export function BrowserSettingsPanel() {
   const bridge = previewBridge;
@@ -22,7 +37,12 @@ export function BrowserSettingsPanel() {
   const [sources, setSources] = useState<DesktopCookieImportSources | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
-  const [status, setStatus] = useState<{ tone: "info" | "error"; message: string } | null>(null);
+  const [status, setStatus] = useState<{
+    tone: "info" | "error";
+    message: string;
+    /** Offers the settings pane that would unblock the import. */
+    grantFullDiskAccess?: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (!bridge) return;
@@ -60,7 +80,15 @@ export function BrowserSettingsPanel() {
         profileDirectory: activeChoice.profileDirectory,
         environmentIds,
       });
-      setStatus({ tone: "info", message: describeImportResult(result) });
+      setStatus(
+        result.status === "permission_required"
+          ? {
+              tone: "error",
+              message: result.detail ?? describeImportResult(result),
+              grantFullDiskAccess: true,
+            }
+          : { tone: "info", message: describeImportResult(result) },
+      );
     } catch (error: unknown) {
       setStatus({
         tone: "error",
@@ -102,8 +130,15 @@ export function BrowserSettingsPanel() {
           description={importDescription}
           status={
             status === null ? null : (
-              <span className={status.tone === "error" ? "text-destructive" : undefined}>
-                {status.message}
+              <span className="flex flex-wrap items-center gap-2">
+                <span className={status.tone === "error" ? "text-destructive" : undefined}>
+                  {status.message}
+                </span>
+                {status.grantFullDiskAccess === true ? (
+                  <Button size="sm" variant="outline" onClick={openFullDiskAccessSettings}>
+                    Open System Settings
+                  </Button>
+                ) : null}
               </span>
             )
           }

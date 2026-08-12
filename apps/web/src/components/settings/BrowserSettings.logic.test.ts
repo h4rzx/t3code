@@ -81,3 +81,19 @@ describe("describeImportResult", () => {
     );
   });
 });
+
+describe("describeImportResult for a withheld permission", () => {
+  it("does not report a blocked import as a successful one", () => {
+    // Falls through to the imported-count wording if the status is ignored,
+    // which would tell the user "0 cookies imported." and leave them with no
+    // idea that a permission is the reason.
+    const described = describeImportResult({
+      status: "permission_required",
+      imported: 0,
+      skipped: noSkips,
+      detail: "macOS keeps Safari's cookies behind Full Disk Access.",
+    });
+    expect(described).not.toContain("imported.");
+    expect(described).toContain("Full Disk Access");
+  });
+});
