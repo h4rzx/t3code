@@ -11,6 +11,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
+- [Browser automation](#browser-automation)
 
 ## Concepts
 
@@ -140,6 +141,47 @@ The patch difference between two checkpoints. Query logic lives in [CheckpointDi
 
 The file patch and changed-file summary for one turn. It is usually computed in [CheckpointDiffQuery.ts][20], represented in [the contracts][1], and recorded into thread state by [projector.ts][4].
 
+### Browser automation
+
+#### Collaborative browser
+
+The preview browser a human and an agent drive together. One webview per
+`(thread, tab)`, hosted by a client and reached through
+[PreviewAutomationBroker.ts][25]. A tab opened by the `t3 browser` CLI is the
+same tab the human sees, which is what makes it collaborative rather than
+headless.
+
+#### Element ref
+
+A handle like `@e1` naming one element in the snapshot that produced it,
+assigned by [refRegistry.ts][26]. Actions accept a ref in place of a selector,
+so a caller acts on an element the snapshot already found instead of writing a
+locator and hoping it matches. Invalidated by the next snapshot or a
+navigation; using a dead one fails with `preview_stale_ref` rather than
+clicking the wrong element.
+
+#### Aria snapshot
+
+The page rendered as an accessibility tree in Playwright's notation, produced
+by the desktop host. It carries the structure that flattened text discards — a
+table is a table, a dialog is over the page — in a fraction of the characters.
+See [browser-automation.md][27].
+
+#### Observation
+
+What changed as a direct result of a mutating action: url, title, whether
+either moved, whether refs went stale, and whether the page looks like a
+sign-in wall. Returned with the action so a caller can decide whether it needs
+a fresh snapshot instead of taking one after every click. Built in
+[preview/http.ts][28].
+
+#### Extract
+
+Structured row reading, distinct from a snapshot. A snapshot is budgeted and
+viewport-shaped, which is right for orientation and wrong for data; `extract`
+queries the DOM directly and paginates over the result set. See
+[extractRequest.ts][29].
+
 ## Practical Shortcuts
 
 - If you see `requested`, think "intent recorded".
@@ -147,6 +189,7 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 - If you see `receipt`, think "async milestone signal, for tests".
 - If you see `checkpoint`, think "workspace snapshot for diff/restore".
 - If you see `quiesced`, think "all relevant follow-up work has gone idle".
+- If you see `@e3`, think "element ref from the last snapshot, dead after the next one".
 
 ## Related Docs
 
@@ -179,3 +222,8 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[25]: ../../apps/server/src/mcp/PreviewAutomationBroker.ts
+[26]: ../../apps/server/src/preview/refRegistry.ts
+[27]: ./browser-automation.md
+[28]: ../../apps/server/src/preview/http.ts
+[29]: ../../apps/server/src/cli/extractRequest.ts
