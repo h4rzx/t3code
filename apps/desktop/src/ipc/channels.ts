@@ -58,6 +58,7 @@ export const PREVIEW_COOKIE_IMPORT_LIST_CHANNEL = "desktop:preview-cookie-import
 export const PREVIEW_COOKIE_IMPORT_RUN_CHANNEL = "desktop:preview-cookie-import-run";
 export const PREVIEW_COOKIE_IMPORT_OPEN_SETTINGS_CHANNEL =
   "desktop:preview-cookie-import-open-settings";
+export const PREVIEW_COOKIE_INVENTORY_CHANNEL = "desktop:preview-cookie-inventory";
 export const PREVIEW_GET_CONFIG_CHANNEL = "desktop:preview-get-config";
 export const PREVIEW_SET_ANNOTATION_THEME_CHANNEL = "desktop:preview-set-annotation-theme";
 export const PREVIEW_PICK_ELEMENT_CHANNEL = "desktop:preview-pick-element";

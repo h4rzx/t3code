@@ -97,4 +97,5 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(CookieImportIpc.listSources);
   yield* ipc.handle(CookieImportIpc.run);
   yield* ipc.handle(CookieImportIpc.openPermissionSettings);
+  yield* ipc.handle(CookieImportIpc.inventory);
 });

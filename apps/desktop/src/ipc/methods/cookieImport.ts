@@ -12,6 +12,7 @@
  */
 import {
   DesktopCookieImportInputSchema,
+  DesktopCookieInventorySchema,
   DesktopCookieImportResultSchema,
   DesktopCookieImportSourcesSchema,
 } from "@t3tools/contracts";
@@ -183,5 +184,35 @@ export const openPermissionSettings = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.cookieImport.openPermissionSettings")(function* () {
     const shell = yield* ElectronShell.ElectronShell;
     return yield* shell.openSystemSettings("full-disk-access");
+  }),
+});
+
+/**
+ * Cookies currently in the preview browser.
+ *
+ * Import has a way in and a way out; this is the way to see it. Without it the
+ * only evidence that anything was imported is a status line that vanishes on
+ * reload, so a user cannot tell an empty preview browser from one they already
+ * filled.
+ *
+ * Counts cookies and the sites owning them. The site count is what people
+ * actually reason about — "am I signed in to the things I need" — and a raw
+ * cookie total is a number without a meaning.
+ */
+export const inventory = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_COOKIE_INVENTORY_CHANNEL,
+  payload: Schema.Void,
+  result: DesktopCookieInventorySchema,
+  handler: Effect.fn("desktop.ipc.cookieImport.inventory")(function* () {
+    const manager = yield* PreviewManager.PreviewManager;
+    const session = yield* manager.getBrowserSession(undefined);
+    const cookies = yield* Effect.tryPromise(() => session.cookies.get({})).pipe(
+      // A browser that cannot be read is reported as empty rather than failing
+      // the Settings screen: this is a label, not an operation.
+      Effect.orElseSucceed(() => []),
+    );
+    const sites = new Set(cookies.map((cookie) => cookie.domain?.replace(/^\./, "") ?? ""));
+    sites.delete("");
+    return { cookies: cookies.length, sites: sites.size };
   }),
 });

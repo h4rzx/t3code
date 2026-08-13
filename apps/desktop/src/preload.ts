@@ -170,6 +170,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       run: (input) => ipcRenderer.invoke(IpcChannels.PREVIEW_COOKIE_IMPORT_RUN_CHANNEL, input),
       openPermissionSettings: () =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_COOKIE_IMPORT_OPEN_SETTINGS_CHANNEL),
+      inventory: () => ipcRenderer.invoke(IpcChannels.PREVIEW_COOKIE_INVENTORY_CHANNEL),
     },
     clearCache: () => ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_CACHE_CHANNEL),
     getPreviewConfig: (environmentId) =>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   choiceValue,
+  describeCookieInventory,
   describeImportResult,
   toChoices,
   type CookieImportSourceList,
@@ -95,5 +96,34 @@ describe("describeImportResult for a withheld permission", () => {
     });
     expect(described).not.toContain("imported.");
     expect(described).toContain("Full Disk Access");
+  });
+});
+
+/**
+ * A one-way door is a bug: import has a way in and a way out, and this is the
+ * way to see it. Without it the only signal that cookies were ever imported is
+ * a status line that disappears when the page is reloaded.
+ */
+describe("describeCookieInventory", () => {
+  it("says the browser is empty rather than showing a zero", () => {
+    expect(describeCookieInventory({ cookies: 0, sites: 0 })).toBe(
+      "The preview browser has no cookies.",
+    );
+  });
+
+  it("counts cookies and the sites they belong to", () => {
+    expect(describeCookieInventory({ cookies: 2667, sites: 412 })).toBe(
+      "2,667 cookies from 412 sites.",
+    );
+  });
+
+  it("reads naturally for a single cookie or a single site", () => {
+    expect(describeCookieInventory({ cookies: 1, sites: 1 })).toBe("1 cookie from 1 site.");
+  });
+
+  it("reports nothing when the count is not known yet", () => {
+    // Null while the count is loading. Rendering "0 cookies" there would be a
+    // lie that corrects itself, which is worse than showing nothing.
+    expect(describeCookieInventory(null)).toBeNull();
   });
 });

@@ -59,3 +59,24 @@ export function describeImportResult(result: DesktopCookieImportResult): string 
     ? imported
     : `${imported} ${skippedTotal} skipped (${reasons.join(", ")}).`;
 }
+
+export interface CookieInventory {
+  readonly cookies: number;
+  readonly sites: number;
+}
+
+/**
+ * What the preview browser currently holds.
+ *
+ * Import has a way in and a way out; this is the way to see it. Null while the
+ * count is still loading, because rendering "0 cookies" before the answer
+ * arrives is a lie that corrects itself a moment later — exactly the stale
+ * label users notice.
+ */
+export function describeCookieInventory(inventory: CookieInventory | null): string | null {
+  if (inventory === null) return null;
+  if (inventory.cookies === 0) return "The preview browser has no cookies.";
+  const cookies = `${inventory.cookies.toLocaleString()} cookie${inventory.cookies === 1 ? "" : "s"}`;
+  const sites = `${inventory.sites.toLocaleString()} site${inventory.sites === 1 ? "" : "s"}`;
+  return `${cookies} from ${sites}.`;
+}

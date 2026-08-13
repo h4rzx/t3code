@@ -1015,6 +1015,13 @@ export const DesktopCookieImportSkippedSchema = Schema.Struct({
   rejected: Schema.Int,
 });
 
+/** What the preview browser currently holds, so an import has a way to be seen. */
+export const DesktopCookieInventorySchema = Schema.Struct({
+  cookies: Schema.Int,
+  sites: Schema.Int,
+});
+export type DesktopCookieInventory = typeof DesktopCookieInventorySchema.Type;
+
 export const DesktopCookieImportResultSchema = Schema.Struct({
   /**
    * "cancelled" when the user declined the confirmation dialog.
@@ -1186,6 +1193,8 @@ export interface DesktopPreviewBridge {
      * URL: the renderer names nothing, so nothing it sends can become one.
      */
     openPermissionSettings: () => Promise<boolean>;
+    /** Cookies currently in the preview browser, across every environment. */
+    inventory: () => Promise<DesktopCookieInventory>;
     run: (input: {
       browserId: DesktopCookieImportBrowserId;
       profileDirectory: string;
