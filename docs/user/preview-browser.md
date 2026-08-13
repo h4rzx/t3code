@@ -12,6 +12,8 @@ browser it has never seen.
 **Settings → Browser** copies your signed-in sessions from a browser you already use, so previews
 can open pages that need a login.
 
+Open it from Settings, or search for "import browser cookies" in the command palette.
+
 Pick a browser and profile, then choose **Import**. T3 Code asks you to confirm first, and names the
 browser it is about to read. Your other browser is never modified.
 
@@ -50,6 +52,12 @@ to open the right settings pane — enable T3 Code there, then quit and reopen t
 notices the change when the app starts.
 
 Other browsers need no permission.
+
+## Seeing what you have
+
+Settings → Browser shows how many cookies the preview browser holds and how many sites they
+belong to. If that number is lower than you expected, or the browser is empty, nothing was
+imported yet.
 
 ## Clearing what you imported
 
