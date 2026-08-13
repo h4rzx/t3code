@@ -57,6 +57,27 @@ the HTTP contract re-declaring every broker error. The common one in practice is
 `PreviewAutomationNoAvailableHostError`: the server is up but no client is connected to host a
 webview.
 
+## Surfaces
+
+Where each piece of this lands, including where it deliberately does not.
+
+|                                 | Web             | Desktop            | Mobile      |
+| ------------------------------- | --------------- | ------------------ | ----------- |
+| Automation (MCP + `t3 browser`) | hosts a webview | hosts a webview    | not a host  |
+| Cookie import                   | desktop-only UI | Settings → Browser | not offered |
+
+**Automation** needs a client that can host a webview and run CDP against it. Desktop does this
+through Electron; the web app does it in a desktop browser window. React Native has no equivalent —
+a `WebView` exposes no debugger protocol — so mobile is not a host. This costs less than it sounds:
+the broker routes to _any_ connected host, so a phone driving a thread still gets a working preview
+as long as some desktop or web client is connected to that environment. Mobile is a controller
+without being a host.
+
+**Cookie import** is Electron-only by construction. It reads the OS keychain and another browser's
+profile off disk, then writes into an Electron `session`. None of those exist in a browser tab or
+on a phone, and the feature would be a security problem if they did. `listSources` reports
+`supported: false` off macOS and Linux, and the Settings row says so rather than hiding.
+
 ## Known gaps
 
 Kept here rather than in a tracker because each one is a trap for the next person reading
