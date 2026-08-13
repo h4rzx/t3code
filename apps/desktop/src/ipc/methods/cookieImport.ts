@@ -137,10 +137,12 @@ export const run = DesktopIpc.makeIpcMethod({
       // with the browser or its cookies, and there is a specific thing the
       // user can do about it. Returning it as an outcome lets the UI offer
       // that action instead of printing the path to it.
-      Effect.catchIf(
-        (error): error is CookieImportError =>
-          error._tag === "CookieImportError" && error.reason === "permission_denied",
-        (error) => Effect.succeed({ permissionRequired: error.detail } as const),
+      Effect.catchTag("CookieImportError", (error) =>
+        error.reason === "permission_denied"
+          ? Effect.succeed({ permissionRequired: error.detail } as const)
+          : // Re-raise anything else: a tagged error is yieldable, so returning
+            // it puts it back in the error channel unchanged.
+            error,
       ),
     );
     if ("permissionRequired" in summary) {
