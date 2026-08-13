@@ -38,7 +38,15 @@ const decodePersistedServerRuntimeState = Schema.decodeUnknownEffect(
   Schema.fromJsonString(PersistedServerRuntimeState),
 );
 
-const runtimeOriginForConfig = (
+/**
+ * The origin every CLI command dials to reach this server.
+ *
+ * Derived from the bind host, which is the one thing that differs between
+ * connection modes. A wildcard is a bind address rather than a destination, so
+ * it becomes loopback; a specific interface is kept, because loopback is not
+ * listening when the server is pinned to one.
+ */
+export const runtimeOriginForConfig = (
   config: Pick<ServerConfig.ServerConfig["Service"], "host">,
   port: number,
 ): PersistedServerRuntimeState["origin"] => {
