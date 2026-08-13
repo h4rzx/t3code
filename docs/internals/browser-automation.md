@@ -130,6 +130,20 @@ cheaper and exact.
   end.
 - Windows (DPAPI) and Linux v11 (login keyring) are unimplemented; Linux v10 works.
 
+### Connection modes
+
+Audited, and clean as far as reading goes. The CLI dials the origin persisted
+from the bind host, which is covered per mode by tests in
+`serverRuntimeState.test.ts`; the environment comes from the server's own
+identity, so a multi-environment setup targets the right browser by
+construction; and the broker routes to any connected host without caring how
+that client reached it, which is what makes a phone able to drive a preview
+some other machine is hosting.
+
+None of it has been exercised over an actual relay or tunnel. The reasoning
+says it should work and nothing contradicts it, but that is not the same as
+having seen it.
+
 ### Test coverage
 
 The pure layers are well covered, and the cookie read seam now has a real SQLite fixture —
