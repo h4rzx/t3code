@@ -36,6 +36,7 @@ import {
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
+  GlobeIcon,
   SettingsIcon,
   SquarePenIcon,
   TextSearchIcon,
@@ -1552,6 +1553,34 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/settings" });
     },
   });
+
+  // Reachable from the palette, not only by browsing Settings. The moment a
+  // user wants this is when a preview just showed them a login page, and
+  // hunting through Settings is not what that moment calls for.
+  if (typeof window !== "undefined" && window.desktopBridge !== undefined) {
+    actionItems.push({
+      kind: "action",
+      value: "action:import-browser-cookies",
+      searchTerms: [
+        "import",
+        "cookies",
+        "browser",
+        "login",
+        "sign in",
+        "session",
+        "preview",
+        "chrome",
+        "safari",
+        "firefox",
+      ],
+      title: "Import browser cookies",
+      description: "Copy signed-in sessions into the preview browser",
+      icon: <GlobeIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/settings/browser" });
+      },
+    });
+  }
 
   // There is no projects listing page; the action targets the contextual
   // project (active thread/draft, falling back to the first sidebar group).
